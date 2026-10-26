@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -275,7 +275,7 @@ test("skill documents token-efficient model selection without overstating contro
   );
   assert.match(
     skill,
-    /When model selection is unavailable, continue with the active Codex model/,
+    /When model selection is unavailable, continue with the active model/,
   );
 });
 
@@ -295,6 +295,8 @@ test("language selection is explicit and production skill content is English", (
     readFileSync(script, "utf8"),
     readFileSync(templateScript, "utf8"),
     readFileSync(templateModule, "utf8"),
+    ...["context.mjs", "codex-source.mjs", "claude-source.mjs"].map(name => readFileSync(join(skillDir, "scripts", "lib", name), "utf8")),
+    readFileSync(join(skillDir, "scripts", "claude-cli-rename.mjs"), "utf8"),
     readFileSync(agentMetadata, "utf8"),
   ].join("\n");
 
@@ -670,4 +672,204 @@ test("skill settles the title template before scanning and warns before switchin
   assert.match(skill, /rename every root session/);
   assert.match(skill, /Never edit the config file directly/);
   assert.doesNotMatch(skill, /40 characters or fewer/);
+});
+
+const renameScript = join(skillDir, "scripts", "claude-cli-rename.mjs");
+const uuid = n => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+
+function claudeEntry(type, content, timestamp, extra = {}) {
+  return JSON.stringify({ type, timestamp, message: { role: type, content }, ...extra });
+}
+
+function claudeFixture(callback) {
+  const dir = mkdtempSync(join(tmpdir(), "codex-session-renamer-claude-"));
+  const claudeDir = join(dir, "claude");
+  const desktopRoot = join(dir, "desktop");
+  const organization = join(desktopRoot, "account", "organization");
+  const project = join(claudeDir, "projects", "-Users-example-project");
+  mkdirSync(organization, { recursive: true });
+  mkdirSync(project, { recursive: true });
+  const writeTranscript = (id, lines) => writeFileSync(join(project, `${id}.jsonl`), `${lines.join("\n")}\n`);
+  const writeDesktop = (id, record) => writeFileSync(join(organization, `local_${id}.json`), JSON.stringify({
+    sessionId: `local_${id}`, cwd: "/Users/example/project", isArchived: false, titleSource: "user", ...record,
+  }));
+  const collect = (platform, args = []) => JSON.parse(execFileSync("node", [
+    script, "--platform", platform, "--claude-dir", claudeDir, "--desktop-dir", desktopRoot, ...args,
+  ], { encoding: "utf8", stdio: "pipe", env: { ...process.env, TZ: "UTC" } }));
+  const rename = (id, title, extra = []) => JSON.parse(execFileSync("node", [
+    renameScript, "--id", id, "--title", title, "--claude-dir", claudeDir, "--desktop-dir", desktopRoot, ...extra,
+  ], { encoding: "utf8", stdio: "pipe" }));
+  try {
+    callback({ dir, claudeDir, desktopRoot, organization, project, writeTranscript, writeDesktop, collect, rename });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("claude-desktop lists app sessions with their app titles and transcript context", () => {
+  claudeFixture(({ writeTranscript, writeDesktop, collect }) => {
+    writeTranscript(uuid(1), [
+      claudeEntry("user", "<system-reminder>Injected reminder secret</system-reminder>Design the desktop adapter", "2026-01-02T10:00:00Z"),
+      claudeEntry("assistant", [{ type: "thinking", thinking: "Hidden reasoning secret" }, { type: "text", text: "The desktop adapter design is finished" }], "2026-01-03T10:00:00Z"),
+      claudeEntry("user", [{ type: "tool_result", content: "Tool output secret" }], "2026-01-09T10:00:00Z"),
+      claudeEntry("user", "Meta expansion secret for the skill", "2026-01-09T10:00:00Z", { isMeta: true }),
+      claudeEntry("assistant", [{ type: "text", text: "Sidechain answer secret here" }], "2026-01-09T10:00:00Z", { isSidechain: true }),
+      JSON.stringify({ type: "custom-title", customTitle: "Transcript title is not the app title", sessionId: uuid(1) }),
+    ]);
+    writeTranscript(uuid(2), [claudeEntry("user", "Rewound session request text", "2026-01-04T10:00:00Z")]);
+    writeDesktop("newer", { cliSessionId: uuid(9), priorCliSessionIds: [uuid(2)], title: "2026-01-04｜Rewound desktop session", createdAt: 1, lastActivityAt: 300 });
+    writeDesktop("older", { cliSessionId: uuid(1), title: "Desktop app title", isArchived: true, createdAt: 1, lastActivityAt: 200 });
+    writeDesktop("remote", { cliSessionId: uuid(7), title: "No local transcript", createdAt: 1, lastActivityAt: 999 });
+
+    const result = collect("claude-desktop");
+    assert.equal(result.platform, "claude-desktop");
+    assert.equal(result.total, 2);
+    assert.deepEqual(result.sessions.map(({ id }) => id), ["local_newer", "local_older"]);
+    const [newer, older] = result.sessions;
+    assert.equal(newer.compliant, true);
+    assert.equal(older.currentTitle, "Desktop app title");
+    assert.equal(older.archived, true);
+    assert.equal(older.date, "2026-01-03");
+    assert.match(older.context, /Session goal 1\/1: Design the desktop adapter/);
+    assert.match(older.context, /Latest outcome: The desktop adapter design is finished/);
+    assert.doesNotMatch(older.context, /secret/i);
+    assert.deepEqual(collect("claude-desktop", ["--ids", "local_older", "--check-only"]).sessions.map(({ id }) => id), ["local_older"]);
+  });
+});
+
+test("claude-desktop refuses to mix accounts unless one organization is chosen", () => {
+  claudeFixture(({ desktopRoot, organization, writeTranscript, writeDesktop, collect }) => {
+    writeTranscript(uuid(1), [claudeEntry("user", "First account request text", "2026-01-02T10:00:00Z")]);
+    writeDesktop("first", { cliSessionId: uuid(1), title: "First", createdAt: 1, lastActivityAt: 1 });
+    const second = join(desktopRoot, "other-account", "organization");
+    mkdirSync(second, { recursive: true });
+    writeFileSync(join(second, "local_second.json"), JSON.stringify({ sessionId: "local_second", cliSessionId: uuid(1), title: "Second" }));
+    assert.throws(() => collect("claude-desktop"), error => {
+      assert.match(error.stderr, /several accounts have sessions/);
+      return true;
+    });
+    const chosen = JSON.parse(execFileSync("node", [
+      script, "--platform", "claude-desktop", "--claude-dir", join(desktopRoot, "..", "claude"), "--desktop-dir", organization,
+    ], { encoding: "utf8", stdio: "pipe" }));
+    assert.deepEqual(chosen.sessions.map(({ id }) => id), ["local_first"]);
+  });
+});
+
+test("claude-cli lists terminal transcripts outside the desktop app and renames them", () => {
+  claudeFixture(({ project, writeTranscript, writeDesktop, collect, rename }) => {
+    writeTranscript(uuid(1), [claudeEntry("user", "Desktop owned request text", "2026-01-02T10:00:00Z")]);
+    writeDesktop("owned", { cliSessionId: uuid(1), title: "Owned", createdAt: 1, lastActivityAt: 1 });
+    writeTranscript(uuid(2), [
+      claudeEntry("user", "Terminal session request text", "2026-01-05T10:00:00Z"),
+      JSON.stringify({ type: "custom-title", customTitle: "Old terminal title", sessionId: uuid(2) }),
+    ]);
+    writeTranscript(uuid(3), [JSON.stringify({ type: "summary", summary: "No user text" })]);
+    mkdirSync(join(project, uuid(2), "subagents"), { recursive: true });
+    writeFileSync(join(project, uuid(2), "subagents", `${uuid(4)}.jsonl`), claudeEntry("user", "Subagent request text", "2026-01-06T10:00:00Z"));
+
+    let result = collect("claude-cli", ["--check-only"]);
+    assert.equal(result.total, 1);
+    assert.equal(result.sessions[0].id, uuid(2));
+    assert.equal(result.sessions[0].currentTitle, "Old terminal title");
+    assert.equal(result.sessions[0].compliant, false);
+
+    // A transcript whose last record lacks a newline still gets a clean line.
+    writeFileSync(join(project, `${uuid(2)}.jsonl`), readFileSync(join(project, `${uuid(2)}.jsonl`), "utf8").trimEnd());
+    assert.deepEqual(rename(uuid(2), "2026-01-05｜Terminal session renamed"), { id: uuid(2), title: "2026-01-05｜Terminal session renamed", renamed: true });
+    const lines = readFileSync(join(project, `${uuid(2)}.jsonl`), "utf8").trimEnd().split("\n").map(line => JSON.parse(line));
+    assert.deepEqual(lines.at(-1), { type: "custom-title", customTitle: "2026-01-05｜Terminal session renamed", sessionId: uuid(2) });
+    result = collect("claude-cli", ["--check-only", "--ids", uuid(2)]);
+    assert.equal(result.sessions[0].compliant, true);
+
+    for (const [id, title, pattern] of [
+      [uuid(1), "2026-01-02｜Desktop owned renamed", /belongs to the desktop app/],
+      [uuid(8), "2026-01-02｜Missing transcript title", /transcript not found/],
+      ["../escape", "2026-01-02｜Path escape attempt", /lowercase UUID/],
+      [uuid(2), "Line\nbreak", /control characters/],
+    ]) {
+      assert.throws(() => rename(id, title), error => {
+        assert.match(error.stderr, pattern);
+        return true;
+      }, String(pattern));
+    }
+  });
+});
+
+test("unknown platforms are rejected", () => {
+  fixture(({ invoke }) => {
+    assert.throws(() => invoke(["--platform", "chatgpt"]), error => {
+      assert.match(error.stderr, /--platform must be one of codex, claude-desktop, claude-cli/);
+      return true;
+    });
+  });
+});
+
+test("skill routes each client to its own collector platform and rename method", () => {
+  const skill = readFileSync(skillFile, "utf8");
+  for (const platform of ["codex", "claude-desktop", "claude-cli"]) assert.match(skill, new RegExp(`\\| \`${platform}\` \\|`));
+  assert.match(skill, /--platform <platform> --check-only --limit 20/);
+  assert.match(skill, /set_session_title/);
+  assert.match(skill, /claude-cli-rename\.mjs --id/);
+  assert.match(skill, /never write titles into session files, databases, or app metadata yourself/);
+  assert.doesNotMatch(skill, /~\/\.codex\/skills\/codex-session-renamer\/scripts/);
+});
+
+test("claude-cli skips command-only transcripts and checks ownership across accounts", () => {
+  claudeFixture(({ desktopRoot, writeTranscript, collect, rename }) => {
+    const command = (name, args = "") => `<command-name>${name}</command-name>\n<command-message>${name.slice(1)}</command-message>\n<command-args>${args}</command-args>`;
+    writeTranscript(uuid(1), [
+      claudeEntry("user", command("/exit"), "2026-01-02T10:00:00Z"),
+      claudeEntry("user", "<local-command-stdout>Goodbye from the terminal session</local-command-stdout>", "2026-01-02T10:00:01Z"),
+    ]);
+    writeTranscript(uuid(2), [claudeEntry("user", command("/review", "the parser change in detail"), "2026-01-03T10:00:00Z")]);
+    // Padding pushes the only goal past the first read chunk.
+    writeTranscript(uuid(3), [
+      ...Array.from({ length: 400 }, () => claudeEntry("assistant", [{ type: "text", text: "x".repeat(1000) }], "2026-01-04T10:00:00Z")),
+      claudeEntry("user", "A late goal after long padding", "2026-01-04T11:00:00Z"),
+    ]);
+    writeTranscript(uuid(5), [claudeEntry("user", "Second account desktop session", "2026-01-05T10:00:00Z")]);
+    const second = join(desktopRoot, "other-account", "organization");
+    mkdirSync(second, { recursive: true });
+    writeFileSync(join(second, "local_other.json"), JSON.stringify({ sessionId: "local_other", cliSessionId: uuid(5), title: "Other" }));
+
+    const result = collect("claude-cli");
+    assert.deepEqual(result.sessions.map(({ id }) => id).sort(), [uuid(2), uuid(3)]);
+    const review = result.sessions.find(({ id }) => id === uuid(2));
+    assert.match(review.context, /Session goal 1\/1: \/review the parser change in detail/);
+    assert.throws(() => rename(uuid(5), "2026-01-05｜Second account renamed"), error => {
+      assert.match(error.stderr, /belongs to the desktop app/);
+      return true;
+    });
+  });
+});
+
+test("a closed WAL-mode Codex database in a read-only folder is still readable", () => {
+  fixture(({ db, dir, invoke }) => {
+    execFileSync("sqlite3", [db, "PRAGMA journal_mode=WAL; INSERT INTO threads VALUES ('session','',1,1000,1,'1970-01-01｜Closed WAL database title',0,'user'); PRAGMA wal_checkpoint(TRUNCATE);"]);
+    // What an exited app leaves behind: a WAL-mode file with no -wal or -shm.
+    rmSync(`${db}-wal`, { force: true });
+    rmSync(`${db}-shm`, { force: true });
+    chmodSync(dir, 0o555);
+    try {
+      assert.throws(() => execFileSync("sqlite3", ["-readonly", db, "SELECT 1;"], { stdio: "pipe" }));
+      const result = JSON.parse(invoke(["--check-only"]));
+      assert.equal(result.total, 1);
+      assert.equal(result.sessions[0].compliant, true);
+      assert.equal(existsSync(`${db}-shm`), false);
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+
+    // A leftover -wal may hold unmerged writes, so an immutable read is unsafe.
+    writeFileSync(`${db}-wal`, "");
+    chmodSync(dir, 0o555);
+    try {
+      assert.throws(() => invoke(["--check-only"]), error => {
+        assert.match(error.stderr, /SQLite metadata query failed/);
+        return true;
+      });
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+  });
 });

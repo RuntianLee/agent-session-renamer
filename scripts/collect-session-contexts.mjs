@@ -6,6 +6,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import zlib from "node:zlib";
+import {
+  compliantTitle,
+  defaultConfigPath,
+  formatIsoDate,
+  frame,
+  resolveTemplate,
+} from "./lib/title-template.mjs";
 
 function readOptions() {
   let values;
@@ -21,6 +28,8 @@ function readOptions() {
         limit: { type: "string" },
         offset: { type: "string" },
         ids: { type: "string" },
+        template: { type: "string" },
+        config: { type: "string", default: defaultConfigPath() },
       },
     }));
   } catch (error) {
@@ -54,6 +63,8 @@ function readOptions() {
     checkOnly: values["check-only"],
     db: values.db,
     sessionIndex: values["session-index"],
+    template: values.template,
+    config: values.config,
     limit: integer(values.limit ?? "20", "limit", 1, 20),
     offset: ids ? null : integer(values.offset ?? "0", "offset", 0, Number.MAX_SAFE_INTEGER),
     ids,
@@ -151,31 +162,6 @@ function readLatestTitles(sessionIndex) {
   }
   return latestTitles;
 }
-const formatter = new Intl.DateTimeFormat("en-CA", {
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-function formatDate(milliseconds) {
-  const parts = Object.fromEntries(
-    formatter
-      .formatToParts(new Date(milliseconds))
-      .filter(({ type }) => type !== "literal")
-      .map(({ type, value }) => [type, value]),
-  );
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
-
-function compliantTitle(title, date) {
-  const prefix = `${date}｜`;
-  if (!title.startsWith(prefix)) return false;
-  const topicLength = Array.from(title.slice(prefix.length)).length;
-  return topicLength >= 10
-    && topicLength <= 28
-    && Array.from(title).length <= 40;
-}
-
 function cleanText(value) {
   if (typeof value !== "string") return "";
   return value
@@ -305,13 +291,14 @@ function collectSession(row, includeContext) {
 }
 
 function main() {
-  const { mode, checkOnly, db, sessionIndex, limit, offset, ids } = readOptions();
+  const { mode, checkOnly, db, sessionIndex, limit, offset, ids, ...templateOptions } = readOptions();
+  const { source: templateSource, template } = resolveTemplate(templateOptions);
   const rootFilter = "COALESCE(thread_source, '') IN ('', 'user')";
   const counts = readSQLite(db, `SELECT COUNT(*) AS total FROM threads WHERE ${rootFilter};`);
   const total = counts[0]?.total;
   if (!Number.isSafeInteger(total) || total < 0) throw new Error("SQLite metadata count is invalid");
   const selectedRows = readSQLite(db, `
-    SELECT id, rollout_path, substr(title, 1, 81) AS title, length(title) > 40 AS title_too_long, archived,
+    SELECT id, rollout_path, substr(title, 1, 81) AS title, archived,
       COALESCE(created_at_ms, created_at * 1000) AS created_at_ms, recency_at_ms
     FROM threads WHERE ${rootFilter}
       ${ids ? `AND id IN (${ids.map(id => `'${id}'`).join(",")})` : ""}
@@ -327,18 +314,21 @@ function main() {
   const sessions = selectedRows.map(row => {
     const indexedTitle = latestTitles.get(row.id)?.title;
     const rawTitle = indexedTitle ?? row.title ?? "";
-    const rawLength = Array.from(rawTitle).length;
-    const tooLong = indexedTitle !== undefined ? rawLength > 40 : Boolean(row.title_too_long);
-    const truncated = rawLength > 80;
+    // SQLite titles arrive cut to 81 characters; anything that long already
+    // exceeds every template's maximum, so the cut cannot hide a valid title.
+    const truncated = Array.from(rawTitle).length > 80;
     const title = truncated ? excerpt(rawTitle, 80) : rawTitle;
     const collected = collectSession({ ...row, title }, !checkOnly);
-    const date = formatDate(collected.lastConversationAtMs ?? row.created_at_ms);
+    const dateMs = collected.lastConversationAtMs ?? row.created_at_ms;
+    const { prefix, suffix } = frame(template, dateMs);
     const session = {
       id: row.id,
-      date,
+      date: formatIsoDate(dateMs),
+      titlePrefix: prefix,
+      titleSuffix: suffix,
       currentTitle: title,
       archived: Boolean(row.archived),
-      compliant: !tooLong && compliantTitle(rawTitle, date),
+      compliant: compliantTitle(rawTitle, { prefix, suffix }),
     };
     if (truncated) session.currentTitleTruncated = true;
     if (!checkOnly) session.context = collected.context;
@@ -352,6 +342,8 @@ function main() {
   process.stdout.write(JSON.stringify({
     mode,
     checkOnly,
+    template: template.source,
+    templateSource,
     offset,
     total,
     nextOffset,

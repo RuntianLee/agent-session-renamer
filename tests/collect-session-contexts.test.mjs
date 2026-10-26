@@ -541,3 +541,22 @@ test("generic client request wrappers expose the actual user goal", () => {
     assert.doesNotMatch(context, /Anonymous wrapper context|Anonymous context before request/);
   });
 });
+
+test("short CJK goals count by character width while filler stays filtered", () => {
+  fixture(({ db, dir, invoke }) => {
+    const rollout = join(dir, "short-cjk.jsonl");
+    writeFileSync(rollout, [
+      message("user", "阿比西尼亚猫", { timestamp: "2026-01-02T10:00:00Z" }),
+      message("user", "备选方案", { timestamp: "2026-01-03T10:00:00Z" }),
+      message("user", "继续", { timestamp: "2026-01-04T10:00:00Z" }),
+      message("user", "ok", { timestamp: "2026-01-05T10:00:00Z" }),
+      message("assistant", "好的", { timestamp: "2026-01-06T10:00:00Z" }),
+    ].join("\n"));
+    execFileSync("sqlite3", [db, `INSERT INTO threads VALUES ('session','${rollout.replaceAll("'", "''")}',1,1000,1,'Short goals',0,'user');`]);
+    const session = JSON.parse(invoke()).sessions[0];
+    assert.match(session.context, /Session goal 1\/2: 阿比西尼亚猫/);
+    assert.match(session.context, /Session goal 2\/2: 备选方案/);
+    assert.doesNotMatch(session.context, /继续|Session goal \d\/\d: ok|好的/);
+    assert.equal(session.date, "2026-01-03");
+  });
+});

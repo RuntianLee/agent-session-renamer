@@ -153,6 +153,8 @@ Codex 会使用内置的 Skill Installer，把 Skill 安装到 `$CODEX_HOME/skil
 - 标题质量取决于每个会话中可用的有效上下文。
 - 收集脚本依赖 Codex 当前的本地文件结构。
 - 没有内置标题历史或自动回滚。
+- 只重命名保存在本机的会话。Codex 的会话存在本地，在一台电脑上改名后，另一台电脑上它自己的会话不会跟着变；需要在每台电脑上分别运行。手机等设备如果是通过 [connected host](https://openai.com/index/work-with-codex-from-anywhere/) 远程查看本机会话，读取的就是本机数据，刷新后能看到新标题。
+- 在网页、手机和桌面之间同步的 ChatGPT Work 对话与 Codex 历史是分开的（[OpenAI 文档](https://learn.chatgpt.com/docs/projects)），本 Skill 不会重命名它们。
 
 ## 许可证
 

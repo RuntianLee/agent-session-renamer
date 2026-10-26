@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import zlib from "node:zlib";
 
@@ -14,7 +14,7 @@ const templateScript = join(skillDir, "scripts", "title-template.mjs");
 const templateModule = join(skillDir, "scripts", "lib", "title-template.mjs");
 
 // Keep a saved template on this machine from changing test results.
-process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "codex-session-renamer-config-"));
+process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "agent-session-renamer-config-"));
 
 function createDb(db, rows) {
   execFileSync("sqlite3", [
@@ -60,7 +60,7 @@ test("pending mode is unavailable", () => {
 });
 
 test("latest session index title overrides stale SQLite metadata", () => {
-  const dir = mkdtempSync(join(tmpdir(), "codex-session-renamer-"));
+  const dir = mkdtempSync(join(tmpdir(), "agent-session-renamer-"));
   const db = join(dir, "state.sqlite");
   const rollout = join(dir, "session.jsonl");
   const sessionIndex = join(dir, "session_index.jsonl");
@@ -102,7 +102,7 @@ test("latest session index title overrides stale SQLite metadata", () => {
 });
 
 test("default invocation includes dated and archived roots", () => {
-  const dir = mkdtempSync(join(tmpdir(), "codex-session-renamer-"));
+  const dir = mkdtempSync(join(tmpdir(), "agent-session-renamer-"));
   const db = join(dir, "state.sqlite");
   const mainRollout = join(dir, "main.jsonl");
 
@@ -149,7 +149,7 @@ test("default invocation includes dated and archived roots", () => {
 });
 
 test("last meaningful conversation dates use the system time zone", () => {
-  const dir = mkdtempSync(join(tmpdir(), "codex-session-renamer-"));
+  const dir = mkdtempSync(join(tmpdir(), "agent-session-renamer-"));
   const db = join(dir, "state.sqlite");
   const createdAt = Date.parse("2026-01-01T00:30:00Z");
   const legacyRollout = join(dir, "legacy.jsonl");
@@ -228,7 +228,7 @@ test("last meaningful conversation dates use the system time zone", () => {
 });
 
 test("long sessions are sampled across the full goal arc", () => {
-  const dir = mkdtempSync(join(tmpdir(), "codex-session-renamer-"));
+  const dir = mkdtempSync(join(tmpdir(), "agent-session-renamer-"));
   const db = join(dir, "state.sqlite");
   const rollout = join(dir, "long.jsonl");
 
@@ -317,7 +317,7 @@ test("language selection is explicit and production skill content is English", (
 });
 
 function fixture(callback, rows = []) {
-  const dir = mkdtempSync(join(tmpdir(), "codex-session-renamer-regression-"));
+  const dir = mkdtempSync(join(tmpdir(), "agent-session-renamer-regression-"));
   const db = join(dir, "state.sqlite");
   const sessionIndex = join(dir, "index.jsonl");
   const invoke = (args = []) => execFileSync("node", [
@@ -577,7 +577,7 @@ function runTemplate(args) {
 }
 
 test("templates reject malformed placeholders and oversized fixed text", () => {
-  const config = join(mkdtempSync(join(tmpdir(), "codex-session-renamer-template-")), "config.json");
+  const config = join(mkdtempSync(join(tmpdir(), "agent-session-renamer-template-")), "config.json");
   for (const template of [
     "", "{date}", "{topic} {topic}", "{date} {date} {topic}", "{title} {topic}", "{date:XX} {topic}",
     "{date:Day D} {topic}", "{date:YYY} {topic}", "{date {topic}", "date} {topic}", "{date}\n{topic}", `${"x".repeat(21)}{topic}`,
@@ -592,7 +592,7 @@ test("templates reject malformed placeholders and oversized fixed text", () => {
 });
 
 test("template helper shows presets, previews, and saves an atomic config", () => {
-  const dir = mkdtempSync(join(tmpdir(), "codex-session-renamer-template-"));
+  const dir = mkdtempSync(join(tmpdir(), "agent-session-renamer-template-"));
   const config = join(dir, "nested", "config.json");
   try {
     const shown = runTemplate(["show", "--config", config]);
@@ -682,7 +682,7 @@ function claudeEntry(type, content, timestamp, extra = {}) {
 }
 
 function claudeFixture(callback) {
-  const dir = mkdtempSync(join(tmpdir(), "codex-session-renamer-claude-"));
+  const dir = mkdtempSync(join(tmpdir(), "agent-session-renamer-claude-"));
   const claudeDir = join(dir, "claude");
   const desktopRoot = join(dir, "desktop");
   const organization = join(desktopRoot, "account", "organization");
@@ -811,7 +811,7 @@ test("skill routes each client to its own collector platform and rename method",
   assert.match(skill, /set_session_title/);
   assert.match(skill, /claude-cli-rename\.mjs --id/);
   assert.match(skill, /never write titles into session files, databases, or app metadata yourself/);
-  assert.doesNotMatch(skill, /~\/\.codex\/skills\/codex-session-renamer\/scripts/);
+  assert.doesNotMatch(skill, /~\/\.codex\/skills\/(agent|codex)-session-renamer\/scripts/);
 });
 
 test("claude-cli skips command-only transcripts and checks ownership across accounts", () => {
@@ -872,4 +872,28 @@ test("a closed WAL-mode Codex database in a read-only folder is still readable",
       chmodSync(dir, 0o755);
     }
   });
+});
+
+test("a template saved under the old skill name keeps working until a new one is saved", () => {
+  const home = mkdtempSync(join(tmpdir(), "agent-session-renamer-xdg-"));
+  const env = { ...process.env, XDG_CONFIG_HOME: home, TZ: "UTC" };
+  const run = args => JSON.parse(execFileSync("node", [templateScript, ...args], { encoding: "utf8", stdio: "pipe", env }));
+  const legacy = join(home, "codex-session-renamer", "config.json");
+  const current = join(home, "agent-session-renamer", "config.json");
+  try {
+    mkdirSync(dirname(legacy), { recursive: true });
+    writeFileSync(legacy, JSON.stringify({ version: 1, template: "{date:MM-DD}｜{topic}" }));
+    let shown = run(["show"]);
+    assert.equal(shown.configured, true);
+    assert.equal(shown.active.template, "{date:MM-DD}｜{topic}");
+
+    shown = run(["save", "--template", "{topic}｜{date}"]);
+    assert.equal(shown.configPath, current);
+    assert.equal(shown.active.template, "{topic}｜{date}");
+    assert.equal(JSON.parse(readFileSync(legacy, "utf8")).template, "{date:MM-DD}｜{topic}");
+    // An explicit --config never falls back to the old location.
+    assert.equal(run(["show", "--config", join(home, "elsewhere.json")]).configured, false);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });

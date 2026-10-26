@@ -1,4 +1,4 @@
 interface:
-  display_name: "Codex Session Renamer"
-  short_description: "Repair recent Codex session titles until a compliant batch is reached"
-  default_prompt: "Use $codex-session-renamer to scan recent root Codex sessions newest-first and repair batches with noncompliant titles, stopping at the first fully compliant batch."
+  display_name: "Agent Session Renamer"
+  short_description: "Repair recent Codex and Claude Code session titles until a compliant batch is reached"
+  default_prompt: "Use $agent-session-renamer to scan recent root Codex sessions newest-first and repair batches with noncompliant titles, stopping at the first fully compliant batch."

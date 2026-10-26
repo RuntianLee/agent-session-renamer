@@ -813,3 +813,32 @@ test("skill routes each client to its own collector platform and rename method",
   assert.match(skill, /never write titles into session files, databases, or app metadata yourself/);
   assert.doesNotMatch(skill, /~\/\.codex\/skills\/codex-session-renamer\/scripts/);
 });
+
+test("claude-cli skips command-only transcripts and checks ownership across accounts", () => {
+  claudeFixture(({ desktopRoot, writeTranscript, collect, rename }) => {
+    const command = (name, args = "") => `<command-name>${name}</command-name>\n<command-message>${name.slice(1)}</command-message>\n<command-args>${args}</command-args>`;
+    writeTranscript(uuid(1), [
+      claudeEntry("user", command("/exit"), "2026-01-02T10:00:00Z"),
+      claudeEntry("user", "<local-command-stdout>Goodbye from the terminal session</local-command-stdout>", "2026-01-02T10:00:01Z"),
+    ]);
+    writeTranscript(uuid(2), [claudeEntry("user", command("/review", "the parser change in detail"), "2026-01-03T10:00:00Z")]);
+    // Padding pushes the only goal past the first read chunk.
+    writeTranscript(uuid(3), [
+      ...Array.from({ length: 400 }, () => claudeEntry("assistant", [{ type: "text", text: "x".repeat(1000) }], "2026-01-04T10:00:00Z")),
+      claudeEntry("user", "A late goal after long padding", "2026-01-04T11:00:00Z"),
+    ]);
+    writeTranscript(uuid(5), [claudeEntry("user", "Second account desktop session", "2026-01-05T10:00:00Z")]);
+    const second = join(desktopRoot, "other-account", "organization");
+    mkdirSync(second, { recursive: true });
+    writeFileSync(join(second, "local_other.json"), JSON.stringify({ sessionId: "local_other", cliSessionId: uuid(5), title: "Other" }));
+
+    const result = collect("claude-cli");
+    assert.deepEqual(result.sessions.map(({ id }) => id).sort(), [uuid(2), uuid(3)]);
+    const review = result.sessions.find(({ id }) => id === uuid(2));
+    assert.match(review.context, /Session goal 1\/1: \/review the parser change in detail/);
+    assert.throws(() => rename(uuid(5), "2026-01-05｜Second account renamed"), error => {
+      assert.match(error.stderr, /belongs to the desktop app/);
+      return true;
+    });
+  });
+});

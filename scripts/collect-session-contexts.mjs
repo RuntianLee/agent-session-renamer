@@ -80,32 +80,27 @@ function readSQLite(db, query) {
   }
 }
 
-function readLocalText(path, step, optional = false) {
+// Returns null for a missing file so callers can choose their own fallback.
+function readIfPresent(path, step, encoding) {
   try {
-    return readFileSync(path, "utf8");
+    return readFileSync(path, encoding);
   } catch (error) {
-    if (optional && error.code === "ENOENT") return "";
+    if (error.code === "ENOENT") return null;
     throw new Error(`${step} failed (${error.code || "read error"})`);
   }
 }
 
-function decompressZstd(path) {
-  let compressed;
-  try {
-    compressed = readFileSync(path);
-  } catch (error) {
-    if (error.code === "ENOENT") return null;
-    throw new Error(`rollout read failed (${error.code || "read error"})`);
-  }
+function decompressZstd(compressed) {
   try {
     if (typeof zlib.zstdDecompressSync === "function") {
       return zlib.zstdDecompressSync(compressed).toString("utf8");
     }
     // Node releases before 22.15 / 23.8 lack built-in zstd support.
-    return execFileSync("zstd", ["-dcq", "--", path], {
+    return execFileSync("zstd", ["-dcq"], {
+      input: compressed,
       encoding: "utf8",
       maxBuffer: 1024 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
   } catch (error) {
     const code = error.code === "ENOENT" ? "zstd unavailable" : error.code || "decompress error";
@@ -113,21 +108,27 @@ function decompressZstd(path) {
   }
 }
 
+function readRolloutOnce(path) {
+  if (path.endsWith(".zst")) {
+    const compressed = readIfPresent(path, "rollout read");
+    return compressed === null ? null : decompressZstd(compressed);
+  }
+  const text = readIfPresent(path, "rollout read", "utf8");
+  if (text !== null) return text;
+  const compressed = readIfPresent(`${path}.zst`, "rollout read");
+  return compressed === null ? null : decompressZstd(compressed);
+}
+
 // Codex compresses older rollouts in place to `<rollout_path>.zst` without
 // updating `threads.rollout_path`, so try the recorded path before its archive.
+// A second attempt covers Codex swapping the two forms between those reads.
 function readRollout(path) {
-  if (path.endsWith(".zst")) return decompressZstd(path) ?? "";
-  try {
-    return readFileSync(path, "utf8");
-  } catch (error) {
-    if (error.code !== "ENOENT") throw new Error(`rollout read failed (${error.code || "read error"})`);
-  }
-  return decompressZstd(`${path}.zst`) ?? "";
+  return readRolloutOnce(path) ?? readRolloutOnce(path) ?? "";
 }
 
 function readLatestTitles(sessionIndex) {
   const latestTitles = new Map();
-  for (const line of readLocalText(sessionIndex, "session index read", true).split("\n")) {
+  for (const line of (readIfPresent(sessionIndex, "session index read", "utf8") ?? "").split("\n")) {
     if (!line.trim()) continue;
     try {
       const entry = JSON.parse(line);

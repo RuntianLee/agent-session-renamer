@@ -402,6 +402,10 @@ test("invalid rollout and session-index paths fail clearly instead of pretending
   });
 });
 
+function sqlString(value) {
+  return value.replaceAll("'", "''");
+}
+
 function writeZstd(path, text) {
   if (typeof zlib.zstdCompressSync === "function") {
     writeFileSync(path, zlib.zstdCompressSync(Buffer.from(text)));
@@ -417,7 +421,7 @@ test("compressed rollouts are read when the recorded path was replaced by .zst",
       message("user", "Compressed session request survives", { timestamp: "2026-01-02T10:00:00Z" }),
       message("assistant", "Compressed outcome was collected", { timestamp: "2026-01-04T10:00:00Z" }),
     ].join("\n"));
-    execFileSync("sqlite3", [db, `INSERT INTO threads VALUES ('session','${rollout}',1,1000,1,'Compressed title',0,'user');`]);
+    execFileSync("sqlite3", [db, `INSERT INTO threads VALUES ('session','${sqlString(rollout)}',1,1000,1,'Compressed title',0,'user');`]);
 
     const context = JSON.parse(invoke());
     assert.match(context.sessions[0].context, /Compressed session request survives/);
@@ -434,7 +438,7 @@ test("compressed rollouts are read when the recorded path was replaced by .zst",
     ], { encoding: "utf8", stdio: "pipe", env: { ...process.env, TZ: "UTC" } }));
     assert.deepEqual(cli.sessions, context.sessions);
 
-    execFileSync("sqlite3", [db, `UPDATE threads SET rollout_path='${rollout}.zst';`]);
+    execFileSync("sqlite3", [db, `UPDATE threads SET rollout_path='${sqlString(`${rollout}.zst`)}';`]);
     assert.equal(JSON.parse(invoke()).sessions[0].date, "2026-01-04");
   });
 });
@@ -444,7 +448,7 @@ test("an uncompressed rollout wins over .zst and corrupt archives fail clearly",
     const rollout = join(dir, "both.jsonl");
     writeFileSync(rollout, message("user", "Live rollout request is preferred", { timestamp: "2026-01-05T10:00:00Z" }));
     writeZstd(`${rollout}.zst`, message("user", "Stale compressed request", { timestamp: "2026-01-02T10:00:00Z" }));
-    execFileSync("sqlite3", [db, `INSERT INTO threads VALUES ('session','${rollout}',1,1000,1,'Anonymous secret sentinel',0,'user');`]);
+    execFileSync("sqlite3", [db, `INSERT INTO threads VALUES ('session','${sqlString(rollout)}',1,1000,1,'Anonymous secret sentinel',0,'user');`]);
     const result = JSON.parse(invoke());
     assert.match(result.sessions[0].context, /Live rollout request is preferred/);
     assert.doesNotMatch(result.sessions[0].context, /Stale compressed request/);

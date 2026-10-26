@@ -49,7 +49,7 @@ The selected language applies to every generated title and all user-visible outp
 
 - OpenAI Codex with access to local thread-management tools.
 - A local Codex session catalog at `~/.codex/state_5.sqlite`.
-- Node.js 20 or newer.
+- Node.js 20 or newer. Reading compressed rollouts needs Node.js 22.15+ / 23.8+, or the `zstd` command on `PATH` for older versions.
 - `sqlite3` available on `PATH`.
 - Tested on macOS.
 
@@ -83,12 +83,13 @@ Replace `English` with a language name or BCP-47 tag such as `zh-CN` or `ja`.
 
 ## How it works
 
-1. Orders root sessions by last conversation time, newest first.
-2. Checks 20 titles using the latest session index title, reads only enough conversation data to compute the same meaningful date used by full mode, and returns `batchCompliant` plus `noncompliantCount`.
-3. Stops immediately when all 20 titles match the date and topic rules.
-4. If any title is invalid, reads compact context for that batch and renames all 20 sessions.
-5. Temporarily unarchives archived tasks, renames them, and restores their archived state.
-6. Continues with the next batch until a compliant batch or the end is reached.
+1. Orders root sessions by the app's `recency_at_ms`, newest first. Each title's date is calculated separately from that session's meaningful conversation timestamps.
+2. Queries at most 20 sessions in SQLite read-only mode, reconciles titles with the newest dated session index entry, and returns `batchCompliant` plus `noncompliantCount`.
+3. Stops immediately when every returned title is compliant.
+4. If any title is invalid, retains the checked batch's IDs and next offset, reads context by those exact IDs, and renames every session in that batch.
+5. Temporarily unarchives archived tasks, renames them, and restores their original archive state even if a write fails.
+6. Rechecks those same IDs, verifying the actual titles and archive states. Retries an unpersisted write once and reports any remaining failure.
+7. After a repaired batch passes verification, continues from its saved next offset until the next initially checked batch is compliant or the end is reached.
 
 ## What `agents/` and `scripts/` do
 
@@ -110,11 +111,15 @@ In simple terms, the script:
 
 1. finds normal root sessions in Codex's local session list;
 2. skips ChatGPT conversations and subagent sessions;
-3. reconciles stale database titles with the latest name in `session_index.jsonl`, then opens each stored conversation and keeps only the last meaningful conversation date, current title, up to four user requests sampled across the conversation, and the latest non-commentary outcome;
+3. reconciles stale database titles with the newest dated name in `session_index.jsonl`, then opens each selected conversation and keeps only the last meaningful conversation date, current title, up to four user requests sampled across the conversation, and the latest non-commentary outcome;
 4. removes noisy content such as attached Skill text, code blocks, and page markup;
 5. supports a lightweight `--check-only` pass that emits no conversation context while using the same date calculation as full mode.
 
 The script only reads local files. It does not decide the new title, change the database, or rename anything by itself. Codex writes the title through its official session tools.
+
+The collector rejects unknown options and invalid numeric arguments. `--limit` accepts 1-20 and `--offset` accepts a nonnegative integer. Use `--ids id1,id2,...` instead of positional pagination when reading or verifying an already checked batch; it preserves ID order and requires every requested root session to exist. `--check-only` can be combined with either selection mode. Legacy string message content is supported, and unrelated or incomplete JSON records are ignored. When Codex has compressed an older rollout to `<rollout_path>.zst`, the collector reads that archive instead; an uncompressed rollout always takes precedence.
+
+Run the tests with `node --test tests/`.
 
 ## Safety and privacy
 
@@ -137,8 +142,10 @@ The script only reads local files. It does not decide the new title, change the 
 ├── SKILL.md
 ├── agents/
 │   └── openai.yaml
-└── scripts/
-    └── collect-session-contexts.mjs
+├── scripts/
+│   └── collect-session-contexts.mjs
+└── tests/
+    └── collect-session-contexts.test.mjs
 ```
 
 ## Limitations

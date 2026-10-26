@@ -47,20 +47,20 @@ Invoking `$codex-session-renamer` scans root Codex sessions from newest to oldes
    node ~/.codex/skills/codex-session-renamer/scripts/collect-session-contexts.mjs --check-only --limit 20 --offset <offset>
    ```
 
-4. The collector reconciles SQLite metadata with the latest title in `session_index.jsonl` and uses the same meaningful-conversation timestamp logic in check-only and context modes. It already orders sessions by last conversation time descending. If `batchCompliant` is `true`, stop immediately. Do not inspect any older batch.
-5. If at least one session has `compliant: false`, rerun the same offset without `--check-only` to obtain compact full-session context:
+4. The collector reads SQLite in read-only mode, queries only the requested batch, and reconciles titles with the newest dated entry in `session_index.jsonl`. Batches follow the app's `recency_at_ms` order; title dates use meaningful conversation timestamps from that batch's rollouts. If `batchCompliant` is `true`, stop immediately. Do not inspect any older batch.
+5. If at least one session has `compliant: false`, retain that batch's ordered session IDs, original archive states, and `nextOffset`. Obtain context for those exact IDs rather than querying the offset again, because concurrent conversation activity can change its membership:
 
    ```bash
-   node ~/.codex/skills/codex-session-renamer/scripts/collect-session-contexts.mjs --limit 20 --offset <offset>
+   node ~/.codex/skills/codex-session-renamer/scripts/collect-session-contexts.mjs --ids '<comma-separated IDs from the checked batch>'
    ```
 
-6. Resummarize and rename every session in that batch, including titles that were already compliant. Identify the theme that persists across the full goal arc; treat late cleanup, reporting, handoff, or follow-up requests as supporting details unless the conversation clearly pivots.
-7. Rename through `set_thread_title`. For an archived session, first set `archived: false`, rename it, then restore `archived: true`; direct archived renames may not persist.
-8. Continue with that batch's `nextOffset` and repeat the lightweight check. Stop when `nextOffset` is `null` or the first fully compliant batch is found.
+6. Resummarize and rename every session in that batch, including titles that were already compliant. Identify the theme that persists across the full goal arc; treat late cleanup, reporting, handoff, or follow-up requests as supporting details unless the conversation clearly pivots. Before writing, verify each candidate's exact collected date prefix, full-width separator, 10-28 character topic, and 40-character total limit; count Unicode characters with `Array.from`, not UTF-16 string length.
+7. Rename through `set_thread_title`. For an archived session, first set `archived: false`, rename it, then restore `archived: true` even if the rename fails; direct archived renames may not persist. Preserve each session's original archive state.
+8. Recheck the same IDs with `--check-only --ids '<the same comma-separated IDs>'`. Confirm every actual title equals its proposed title, all titles are compliant, and archive states match their originals. If a write has not persisted, reread and retry only the affected sessions once, restoring their archive state again. Report any remaining failure and stop instead of moving to an older batch. A successful recheck of a repaired batch is verification, not the stopping batch: continue with the `nextOffset` saved from its initial check. Stop when that saved offset is `null` or the next initially checked batch is fully compliant.
 9. Return a concise report containing checked, renamed, skipped, and failed counts, plus whether the run stopped on a compliant batch.
 
 Title compliance requires the exact computed date prefix, the full-width separator `｜`, a 10-28 character topic, and a complete title no longer than 40 characters.
 
-If the local query fails, stop and report the error. Never continue to older batches after a fully compliant batch.
+Use the provided collector; do not replace it with ad hoc history-parsing scripts. Run it by its installed path so the working directory does not affect execution. `--limit` accepts 1-20, `--offset` accepts a nonnegative integer, and `--ids` selects at most 20 unique root-session IDs without positional pagination. Oversized old titles are bounded display excerpts marked `currentTitleTruncated`; use the supplied compliance result rather than validating that excerpt as the stored title. Valid new titles are returned in full for exact persistence checks. When `rollout_path` is absent but `<rollout_path>.zst` exists, the collector reads the compressed rollout. Rollouts missing in both forms retain the creation-date fallback; other query or file-read failures stop the run. Report those failures without repairing the database or silently omitting requested sessions. Never continue to older batches after a fully compliant batch.
 
 Never rename ChatGPT sessions or subagents. Never create or update an automation from this skill.

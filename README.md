@@ -153,6 +153,8 @@ Run the tests with `node --test tests/`.
 - Title quality depends on the meaningful context available in each session.
 - The collector relies on Codex's current local file layout.
 - There is no built-in title history or automatic rollback.
+- Only sessions stored on this computer are renamed. Codex keeps its threads locally, so a renamed title does not appear on another computer that has its own sessions; run the skill on each computer. Phones and other devices that open this computer's threads through a [connected host](https://openai.com/index/work-with-codex-from-anywhere/) read them from here and show the new titles after they refresh.
+- ChatGPT Work conversations that sync across web, mobile, and desktop are separate from Codex history ([OpenAI docs](https://learn.chatgpt.com/docs/projects)) and are never renamed.
 
 ## License
 

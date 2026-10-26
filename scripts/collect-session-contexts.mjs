@@ -205,6 +205,19 @@ function meaningfulUserGoal(value) {
   return text;
 }
 
+// East Asian scripts pack a word into one or two characters, so weigh each
+// like a wide terminal cell. "ok" or a two-character "continue" stays below
+// the threshold, while a four-character goal such as a short CJK request
+// passes it.
+const WIDE_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const MIN_MEANINGFUL_WEIGHT = 8;
+
+function meaningfulWeight(text) {
+  let weight = 0;
+  for (const char of text) weight += WIDE_SCRIPT.test(char) ? 2 : 1;
+  return weight;
+}
+
 function sampleAcross(values, maxSamples) {
   if (values.length <= maxSamples) return values;
   const indexes = Array.from({ length: maxSamples }, (_, index) =>
@@ -261,7 +274,7 @@ function collectSession(row, includeContext) {
       const text = isUser
         ? meaningfulUserGoal(messageText(payload))
         : cleanText(messageText(payload));
-      if (text.length < 8) continue;
+      if (meaningfulWeight(text) < MIN_MEANINGFUL_WEIGHT) continue;
       if (Number.isFinite(messageAtMs)
         && (lastConversationAtMs === null || messageAtMs > lastConversationAtMs)) {
         lastConversationAtMs = messageAtMs;

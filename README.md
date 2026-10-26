@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Manually repair recent root Codex session titles as `YYYY-MM-DD｜Core topic summary`, scanning newest-first and stopping at the first fully compliant batch.
+Manually repair recent root Codex session titles as `YYYY-MM-DD｜Core topic summary` (or your own template), scanning newest-first and stopping at the first fully compliant batch.
 
 > **Disclaimer.** Each noncompliant batch is fully renamed and there is no built-in rollback. Read [SKILL.md](SKILL.md) before using it.
 
@@ -11,8 +11,9 @@ Manually repair recent root Codex session titles as `YYYY-MM-DD｜Core topic sum
 | Capability | Behavior |
 | --- | --- |
 | Semantic titles | Uses the dominant theme across the full goal arc, refined by the actual outcome. |
-| Last conversation date | Prefixes every title with the date of its last meaningful conversation in the system's current time zone. |
+| Last conversation date | Dates every title with its last meaningful conversation in the system's current time zone. |
 | Incremental manual run | Checks 20 newest-first; renames the whole batch when any title is invalid, then stops at the first fully compliant batch. |
+| Custom title template | Choose a preset or your own template on first run, such as `{date:MM-DD}｜{topic}` without the year. |
 | Conversation-aware language | By default, each title follows its own session's dominant user language. |
 | Optional language | `language=<language>` forces one language for all titles and user-visible output. |
 | Token efficiency | Prefers a token-efficient model when model selection is available and uses compact session context. |
@@ -21,11 +22,26 @@ Manually repair recent root Codex session titles as `YYYY-MM-DD｜Core topic sum
 
 ## Naming and language behavior
 
-The title format is:
+The default title format is:
 
 ```text
 YYYY-MM-DD｜Core topic summary
 ```
+
+### Title template
+
+On first run the Skill offers these presets and saves your choice to `~/.config/codex-session-renamer/config.json` (or `$XDG_CONFIG_HOME/codex-session-renamer/config.json`):
+
+| Preset | Template | Example |
+| --- | --- | --- |
+| `default` | `{date}｜{topic}` | `2026-10-26｜Core topic summary` |
+| `no-year` | `{date:MM-DD}｜{topic}` | `10-26｜Core topic summary` |
+| `date-last` | `{topic}｜{date}` | `Core topic summary｜2026-10-26` |
+| `dotted` | `{date:YYYY.MM.DD} {topic}` | `2026.10.26 Core topic summary` |
+
+A custom template needs exactly one `{topic}` and at most one `{date}` or `{date:FORMAT}`; FORMAT combines `YYYY`, `YY`, `MM`, `M`, `DD`, and `D`, and other text is kept as written. The text around the topic may total at most 20 characters, and the topic stays 10-28 characters.
+
+> **Changing the template renames everything.** Titles in the old format no longer match, so the following scans rename every root session. The Skill warns and asks before saving a new template. Titles without a year are ambiguous across years.
 
 The date comes from the last meaningful user message or assistant answer. Progress commentary is ignored. If no valid conversation timestamp is available, the creation date is used instead.
 
@@ -79,6 +95,14 @@ Use $codex-session-renamer language=English to repair recent root Codex session 
 
 Replace `English` with a language name or BCP-47 tag such as `zh-CN` or `ja`.
 
+### Change the title template
+
+```text
+Use $codex-session-renamer template={date:MM-DD}｜{topic} to repair recent root Codex session titles.
+```
+
+You can also ask it to change or reset the template; it previews the result and confirms before saving.
+
 > **Important:** the Skill renames every session in a batch when any title in that batch is noncompliant. It has no scheduled mode, dry run, or automatic title backup.
 
 ## How it works
@@ -115,7 +139,7 @@ In simple terms, the script:
 4. removes noisy content such as attached Skill text, code blocks, and page markup;
 5. supports a lightweight `--check-only` pass that emits no conversation context while using the same date calculation as full mode.
 
-The script only reads local files. It does not decide the new title, change the database, or rename anything by itself. Codex writes the title through its official session tools.
+The collector only reads local files. It does not decide the new title, change the database, or rename anything by itself. Codex writes the title through its official session tools. `title-template.mjs` shows presets, previews a template, and saves the chosen one; it is the only script that writes, and it writes only its own config file. The collector applies the saved template, or a one-off `--template`, and returns each session's `titlePrefix` and `titleSuffix`.
 
 The collector rejects unknown options and invalid numeric arguments. `--limit` accepts 1-20 and `--offset` accepts a nonnegative integer. Use `--ids id1,id2,...` instead of positional pagination when reading or verifying an already checked batch; it preserves ID order and requires every requested root session to exist. `--check-only` can be combined with either selection mode. Legacy string message content is supported, and unrelated or incomplete JSON records are ignored. When Codex has compressed an older rollout to `<rollout_path>.zst`, the collector reads that archive instead; an uncompressed rollout always takes precedence.
 
@@ -143,7 +167,10 @@ Run the tests with `node --test tests/`.
 ├── agents/
 │   └── openai.yaml
 ├── scripts/
-│   └── collect-session-contexts.mjs
+│   ├── collect-session-contexts.mjs
+│   ├── title-template.mjs
+│   └── lib/
+│       └── title-template.mjs
 └── tests/
     └── collect-session-contexts.test.mjs
 ```

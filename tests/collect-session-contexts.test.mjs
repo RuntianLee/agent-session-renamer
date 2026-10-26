@@ -10,6 +10,11 @@ const skillDir = new URL("..", import.meta.url).pathname;
 const script = join(skillDir, "scripts", "collect-session-contexts.mjs");
 const skillFile = join(skillDir, "SKILL.md");
 const agentMetadata = join(skillDir, "agents", "openai.yaml");
+const templateScript = join(skillDir, "scripts", "title-template.mjs");
+const templateModule = join(skillDir, "scripts", "lib", "title-template.mjs");
+
+// Keep a saved template on this machine from changing test results.
+process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), "codex-session-renamer-config-"));
 
 function createDb(db, rows) {
   execFileSync("sqlite3", [
@@ -288,6 +293,8 @@ test("language selection is explicit and production skill content is English", (
   const productionContent = [
     skill,
     readFileSync(script, "utf8"),
+    readFileSync(templateScript, "utf8"),
+    readFileSync(templateModule, "utf8"),
     readFileSync(agentMetadata, "utf8"),
   ].join("\n");
 
@@ -559,4 +566,108 @@ test("short CJK goals count by character width while filler stays filtered", () 
     assert.doesNotMatch(session.context, /继续|Session goal \d\/\d: ok|好的/);
     assert.equal(session.date, "2026-01-03");
   });
+});
+
+function runTemplate(args) {
+  return JSON.parse(execFileSync("node", [templateScript, ...args], {
+    encoding: "utf8", stdio: "pipe", env: { ...process.env, TZ: "UTC" },
+  }));
+}
+
+test("templates reject malformed placeholders and oversized fixed text", () => {
+  const config = join(mkdtempSync(join(tmpdir(), "codex-session-renamer-template-")), "config.json");
+  for (const template of [
+    "", "{date}", "{topic} {topic}", "{date} {date} {topic}", "{title} {topic}", "{date:XX} {topic}",
+    "{date {topic}", "date} {topic}", "{date}\n{topic}", `${"x".repeat(21)}{topic}`,
+  ]) {
+    assert.throws(() => runTemplate(["preview", "--template", template, "--config", config]), error => {
+      assert.match(error.stderr, /title-template failed: template failed/);
+      return true;
+    }, template);
+  }
+  assert.throws(() => runTemplate(["save", "--template", "{date}", "--config", config]));
+  assert.equal(existsSync(config), false);
+});
+
+test("template helper shows presets, previews, and saves an atomic config", () => {
+  const dir = mkdtempSync(join(tmpdir(), "codex-session-renamer-template-"));
+  const config = join(dir, "nested", "config.json");
+  try {
+    const shown = runTemplate(["show", "--config", config]);
+    assert.equal(shown.configured, false);
+    assert.equal(shown.active.template, "{date}｜{topic}");
+    assert.match(shown.active.example, /^\d{4}-\d{2}-\d{2}｜<topic>$/);
+    assert.deepEqual(shown.presets.map(({ id }) => id), ["default", "no-year", "date-last", "dotted"]);
+    assert.match(shown.presets[1].example, /^\d{2}-\d{2}｜<topic>$/);
+
+    const preview = runTemplate(["preview", "--template", "{topic}（{date:M/D}）", "--config", config]);
+    assert.match(preview.preview.example, /^<topic>（\d{1,2}\/\d{1,2}）$/);
+    assert.equal(preview.configured, false);
+
+    const saved = runTemplate(["save", "--template", "{date:MM-DD}｜{topic}", "--config", config]);
+    assert.equal(saved.configured, true);
+    assert.equal(saved.active.template, "{date:MM-DD}｜{topic}");
+    assert.deepEqual(JSON.parse(readFileSync(config, "utf8")), { version: 1, template: "{date:MM-DD}｜{topic}" });
+
+    for (const args of [["show", "--template", "{topic}"], ["preview"], ["save"], ["reset"], ["show", "extra"]]) {
+      assert.throws(() => runTemplate([...args, "--config", config]), args.join(" "));
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("collector checks titles against the saved or explicit template", () => {
+  fixture(({ db, dir, sessionIndex, invoke }) => {
+    const rollout = join(dir, "template.jsonl");
+    writeFileSync(rollout, message("user", "A meaningful template request", { timestamp: "2026-01-02T10:00:00Z" }));
+    execFileSync("sqlite3", [db, `INSERT INTO threads VALUES ('session','${rollout.replaceAll("'", "''")}',1,1000,1,'unused',0,'user');`]);
+    const config = join(dir, "config.json");
+    const setTitle = title => writeFileSync(sessionIndex, JSON.stringify({ id: "session", thread_name: title }));
+    const check = (...args) => JSON.parse(invoke(["--check-only", "--config", config, ...args]));
+
+    setTitle("2026-01-02｜Canonical session title");
+    let result = check();
+    assert.equal(result.templateSource, "default");
+    assert.equal(result.sessions[0].compliant, true);
+    assert.equal(result.sessions[0].titlePrefix, "2026-01-02｜");
+    assert.equal(result.sessions[0].titleSuffix, "");
+
+    runTemplate(["save", "--template", "{date:MM-DD}｜{topic}", "--config", config]);
+    result = check();
+    assert.equal(result.template, "{date:MM-DD}｜{topic}");
+    assert.equal(result.templateSource, "config");
+    assert.equal(result.sessions[0].date, "2026-01-02");
+    assert.equal(result.sessions[0].titlePrefix, "01-02｜");
+    assert.equal(result.sessions[0].compliant, false);
+    setTitle("01-02｜Canonical session title");
+    assert.equal(check().sessions[0].compliant, true);
+
+    setTitle("Canonical session title（1/2）");
+    result = check("--template", "{topic}（{date:M/D}）");
+    assert.equal(result.templateSource, "argument");
+    assert.equal(result.sessions[0].titleSuffix, "（1/2）");
+    assert.equal(result.sessions[0].compliant, true);
+    setTitle("Too short（1/2）");
+    assert.equal(check("--template", "{topic}（{date:M/D}）").sessions[0].compliant, false);
+    setTitle(`${"A".repeat(29)}（1/2）`);
+    assert.equal(check("--template", "{topic}（{date:M/D}）").sessions[0].compliant, false);
+
+    writeFileSync(config, "{not json");
+    assert.throws(() => check(), error => {
+      assert.match(error.stderr, /config read failed \(invalid JSON\)/);
+      return true;
+    });
+    assert.throws(() => check("--template", "{date}"), /template failed/);
+  });
+});
+
+test("skill settles the title template before scanning and warns before switching", () => {
+  const skill = readFileSync(skillFile, "utf8");
+  assert.match(skill, /## Title Template/);
+  assert.match(skill, /title-template\.mjs show/);
+  assert.match(skill, /`titlePrefix`, then the topic, then its `titleSuffix`/);
+  assert.match(skill, /rename every root session/);
+  assert.match(skill, /Never edit the config file directly/);
+  assert.doesNotMatch(skill, /40 characters or fewer/);
 });

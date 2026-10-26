@@ -39,7 +39,7 @@ On first run the Skill offers these presets and saves your choice to `~/.config/
 | `date-last` | `{topic}｜{date}` | `Core topic summary｜2026-10-26` |
 | `dotted` | `{date:YYYY.MM.DD} {topic}` | `2026.10.26 Core topic summary` |
 
-A custom template needs exactly one `{topic}` and at most one `{date}` or `{date:FORMAT}`; FORMAT combines `YYYY`, `YY`, `MM`, `M`, `DD`, and `D`, and other text is kept as written. The text around the topic may total at most 20 characters, and the topic stays 10-28 characters.
+A custom template needs exactly one `{topic}` and at most one `{date}` or `{date:FORMAT}`; FORMAT combines `YYYY`, `YY`, `MM`, `M`, `DD`, and `D` with separators (Latin words go outside the braces), and other text is kept as written. The text around the topic may total at most 20 characters, and the topic stays 10-28 characters.
 
 > **Changing the template renames everything.** Titles in the old format no longer match, so the following scans rename every root session. The Skill warns and asks before saving a new template. Titles without a year are ambiguous across years.
 

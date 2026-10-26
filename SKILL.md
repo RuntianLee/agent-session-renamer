@@ -21,7 +21,7 @@ Invoking `$codex-session-renamer` scans root Codex sessions from newest to oldes
 
 ## Title Template
 
-Titles follow a template with exactly one `{topic}` and at most one `{date}` or `{date:FORMAT}`; everything else is literal text. FORMAT combines `YYYY`, `YY`, `MM`, `M`, `DD`, and `D`, so avoid other uppercase Y, M, or D letters inside it. The default is `{date}｜{topic}`, which renders as `YYYY-MM-DD｜Core topic summary`. Text around `{topic}` may total at most 20 characters.
+Titles follow a template with exactly one `{topic}` and at most one `{date}` or `{date:FORMAT}`; everything else is literal text. FORMAT combines `YYYY`, `YY`, `MM`, `M`, `DD`, and `D` with separators; other Latin letters are rejected, so words belong outside `{date:...}`. The default is `{date}｜{topic}`, which renders as `YYYY-MM-DD｜Core topic summary`. Text around `{topic}` may total at most 20 characters.
 
 Manage the template only through the helper:
 

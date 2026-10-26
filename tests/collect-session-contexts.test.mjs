@@ -578,7 +578,7 @@ test("templates reject malformed placeholders and oversized fixed text", () => {
   const config = join(mkdtempSync(join(tmpdir(), "codex-session-renamer-template-")), "config.json");
   for (const template of [
     "", "{date}", "{topic} {topic}", "{date} {date} {topic}", "{title} {topic}", "{date:XX} {topic}",
-    "{date {topic}", "date} {topic}", "{date}\n{topic}", `${"x".repeat(21)}{topic}`,
+    "{date:Day D} {topic}", "{date:YYY} {topic}", "{date {topic}", "date} {topic}", "{date}\n{topic}", `${"x".repeat(21)}{topic}`,
   ]) {
     assert.throws(() => runTemplate(["preview", "--template", template, "--config", config]), error => {
       assert.match(error.stderr, /title-template failed: template failed/);

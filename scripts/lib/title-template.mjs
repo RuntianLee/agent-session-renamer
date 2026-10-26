@@ -49,6 +49,10 @@ export function parseTemplate(source) {
       if (!format.match(DATE_TOKEN) || format.includes("{")) {
         throw new Error("template failed: date format needs YYYY, YY, MM, M, DD, or D");
       }
+      // Letters would be read as tokens ("Day" -> "26ay"), so keep words outside.
+      if (/[A-Za-z]/.test(format.replace(DATE_TOKEN, ""))) {
+        throw new Error("template failed: put words outside {date:...}; it accepts only YYYY, YY, MM, M, DD, D, and separators");
+      }
       dates += 1;
       parts.push({ type: "date", format });
     } else {

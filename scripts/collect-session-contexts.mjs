@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import zlib from "node:zlib";
 
 function readOptions() {
   let values;
@@ -86,6 +87,42 @@ function readLocalText(path, step, optional = false) {
     if (optional && error.code === "ENOENT") return "";
     throw new Error(`${step} failed (${error.code || "read error"})`);
   }
+}
+
+function decompressZstd(path) {
+  let compressed;
+  try {
+    compressed = readFileSync(path);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw new Error(`rollout read failed (${error.code || "read error"})`);
+  }
+  try {
+    if (typeof zlib.zstdDecompressSync === "function") {
+      return zlib.zstdDecompressSync(compressed).toString("utf8");
+    }
+    // Node releases before 22.15 / 23.8 lack built-in zstd support.
+    return execFileSync("zstd", ["-dcq", "--", path], {
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    const code = error.code === "ENOENT" ? "zstd unavailable" : error.code || "decompress error";
+    throw new Error(`rollout read failed (${code})`);
+  }
+}
+
+// Codex compresses older rollouts in place to `<rollout_path>.zst` without
+// updating `threads.rollout_path`, so try the recorded path before its archive.
+function readRollout(path) {
+  if (path.endsWith(".zst")) return decompressZstd(path) ?? "";
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw new Error(`rollout read failed (${error.code || "read error"})`);
+  }
+  return decompressZstd(`${path}.zst`) ?? "";
 }
 
 function readLatestTitles(sessionIndex) {
@@ -200,7 +237,7 @@ function collectSession(row, includeContext) {
   let lastConversationAtMs = null;
 
   if (row.rollout_path) {
-    for (const line of readLocalText(row.rollout_path, "rollout read", true).split("\n")) {
+    for (const line of readRollout(row.rollout_path).split("\n")) {
       if (!line.trim()) continue;
 
       let event;

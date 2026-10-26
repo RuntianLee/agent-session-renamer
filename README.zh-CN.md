@@ -49,7 +49,7 @@ language=ja
 
 - OpenAI Codex，并且可以使用本地会话管理工具。
 - 本地存在 `~/.codex/state_5.sqlite` 会话目录。
-- Node.js 20 或更高版本。
+- Node.js 20 或更高版本。读取压缩后的会话记录需要 Node.js 22.15+ / 23.8+；更早的版本需要 `PATH` 中有 `zstd` 命令。
 - `sqlite3` 已加入 `PATH`。
 - 已在 macOS 上测试。
 
@@ -117,7 +117,9 @@ Codex 会使用内置的 Skill Installer，把 Skill 安装到 `$CODEX_HOME/skil
 
 脚本只读取本地文件。它不会自己决定标题、修改数据库或执行重命名。真正的标题写入由 Codex 官方会话工具完成。
 
-采集器会拒绝未知参数和非法数值。`--limit` 接受 1–20，`--offset` 接受非负整数。读取或复查已选定批次时，用 `--ids id1,id2,...` 固定身份，保持传入顺序，并要求所有 ID 都对应现存根会话；它不能与位置分页参数混用。两种选择方式均可加 `--check-only`。历史字符串消息内容可以读取，无关或不完整 JSON 记录会跳过。
+采集器会拒绝未知参数和非法数值。`--limit` 接受 1–20，`--offset` 接受非负整数。读取或复查已选定批次时，用 `--ids id1,id2,...` 固定身份，保持传入顺序，并要求所有 ID 都对应现存根会话；它不能与位置分页参数混用。两种选择方式均可加 `--check-only`。历史字符串消息内容可以读取，无关或不完整 JSON 记录会跳过。Codex 会把较旧的会话记录压缩为 `<rollout_path>.zst`，此时采集器改读压缩文件；未压缩的原文件始终优先。
+
+运行测试：`node --test tests/`。
 
 ## 安全与隐私
 
@@ -140,8 +142,10 @@ Codex 会使用内置的 Skill Installer，把 Skill 安装到 `$CODEX_HOME/skil
 ├── SKILL.md
 ├── agents/
 │   └── openai.yaml
-└── scripts/
-    └── collect-session-contexts.mjs
+├── scripts/
+│   └── collect-session-contexts.mjs
+└── tests/
+    └── collect-session-contexts.test.mjs
 ```
 
 ## 已知限制

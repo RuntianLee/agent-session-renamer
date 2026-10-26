@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import zlib from "node:zlib";
 
 const skillDir = new URL("..", import.meta.url).pathname;
 const script = join(skillDir, "scripts", "collect-session-contexts.mjs");
@@ -396,6 +397,64 @@ test("invalid rollout and session-index paths fail clearly instead of pretending
     mkdirSync(sessionIndex);
     assert.throws(() => invoke(), error => {
       assert.match(error.stderr, /session index read/);
+      return true;
+    });
+  });
+});
+
+function writeZstd(path, text) {
+  if (typeof zlib.zstdCompressSync === "function") {
+    writeFileSync(path, zlib.zstdCompressSync(Buffer.from(text)));
+  } else {
+    execFileSync("zstd", ["-qfo", path], { input: text });
+  }
+}
+
+test("compressed rollouts are read when the recorded path was replaced by .zst", () => {
+  fixture(({ db, dir, sessionIndex, invoke }) => {
+    const rollout = join(dir, "compressed.jsonl");
+    writeZstd(`${rollout}.zst`, [
+      message("user", "Compressed session request survives", { timestamp: "2026-01-02T10:00:00Z" }),
+      message("assistant", "Compressed outcome was collected", { timestamp: "2026-01-04T10:00:00Z" }),
+    ].join("\n"));
+    execFileSync("sqlite3", [db, `INSERT INTO threads VALUES ('session','${rollout}',1,1000,1,'Compressed title',0,'user');`]);
+
+    const context = JSON.parse(invoke());
+    assert.match(context.sessions[0].context, /Compressed session request survives/);
+    assert.match(context.sessions[0].context, /Compressed outcome was collected/);
+    assert.equal(context.sessions[0].date, "2026-01-04");
+    assert.equal(JSON.parse(invoke(["--check-only"])).sessions[0].date, "2026-01-04");
+
+    // Older Node releases fall back to the zstd CLI.
+    const withoutZlibZstd = `data:text/javascript,${encodeURIComponent(
+      'import zlib from "node:zlib"; delete zlib.zstdDecompressSync;',
+    )}`;
+    const cli = JSON.parse(execFileSync("node", [
+      "--import", withoutZlibZstd, script, "--db", db, "--session-index", sessionIndex,
+    ], { encoding: "utf8", stdio: "pipe", env: { ...process.env, TZ: "UTC" } }));
+    assert.deepEqual(cli.sessions, context.sessions);
+
+    execFileSync("sqlite3", [db, `UPDATE threads SET rollout_path='${rollout}.zst';`]);
+    assert.equal(JSON.parse(invoke()).sessions[0].date, "2026-01-04");
+  });
+});
+
+test("an uncompressed rollout wins over .zst and corrupt archives fail clearly", () => {
+  fixture(({ db, dir, invoke }) => {
+    const rollout = join(dir, "both.jsonl");
+    writeFileSync(rollout, message("user", "Live rollout request is preferred", { timestamp: "2026-01-05T10:00:00Z" }));
+    writeZstd(`${rollout}.zst`, message("user", "Stale compressed request", { timestamp: "2026-01-02T10:00:00Z" }));
+    execFileSync("sqlite3", [db, `INSERT INTO threads VALUES ('session','${rollout}',1,1000,1,'Anonymous secret sentinel',0,'user');`]);
+    const result = JSON.parse(invoke());
+    assert.match(result.sessions[0].context, /Live rollout request is preferred/);
+    assert.doesNotMatch(result.sessions[0].context, /Stale compressed request/);
+    assert.equal(result.sessions[0].date, "2026-01-05");
+
+    rmSync(rollout);
+    writeFileSync(`${rollout}.zst`, "not a zstd frame");
+    assert.throws(() => invoke(), error => {
+      assert.match(error.stderr, /rollout read failed/);
+      assert.doesNotMatch(error.stderr, /Anonymous secret sentinel|at decompressZstd/);
       return true;
     });
   });

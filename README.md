@@ -49,7 +49,7 @@ The selected language applies to every generated title and all user-visible outp
 
 - OpenAI Codex with access to local thread-management tools.
 - A local Codex session catalog at `~/.codex/state_5.sqlite`.
-- Node.js 20 or newer.
+- Node.js 20 or newer. Reading compressed rollouts needs Node.js 22.15+ / 23.8+, or the `zstd` command on `PATH` for older versions.
 - `sqlite3` available on `PATH`.
 - Tested on macOS.
 
@@ -117,7 +117,9 @@ In simple terms, the script:
 
 The script only reads local files. It does not decide the new title, change the database, or rename anything by itself. Codex writes the title through its official session tools.
 
-The collector rejects unknown options and invalid numeric arguments. `--limit` accepts 1-20 and `--offset` accepts a nonnegative integer. Use `--ids id1,id2,...` instead of positional pagination when reading or verifying an already checked batch; it preserves ID order and requires every requested root session to exist. `--check-only` can be combined with either selection mode. Legacy string message content is supported, and unrelated or incomplete JSON records are ignored.
+The collector rejects unknown options and invalid numeric arguments. `--limit` accepts 1-20 and `--offset` accepts a nonnegative integer. Use `--ids id1,id2,...` instead of positional pagination when reading or verifying an already checked batch; it preserves ID order and requires every requested root session to exist. `--check-only` can be combined with either selection mode. Legacy string message content is supported, and unrelated or incomplete JSON records are ignored. When Codex has compressed an older rollout to `<rollout_path>.zst`, the collector reads that archive instead; an uncompressed rollout always takes precedence.
+
+Run the tests with `node --test tests/`.
 
 ## Safety and privacy
 
@@ -140,8 +142,10 @@ The collector rejects unknown options and invalid numeric arguments. `--limit` a
 ├── SKILL.md
 ├── agents/
 │   └── openai.yaml
-└── scripts/
-    └── collect-session-contexts.mjs
+├── scripts/
+│   └── collect-session-contexts.mjs
+└── tests/
+    └── collect-session-contexts.test.mjs
 ```
 
 ## Limitations

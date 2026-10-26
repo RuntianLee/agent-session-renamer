@@ -18,7 +18,7 @@
 | 按会话选择语言 | 默认让每个标题跟随对应会话的主要用户语言。 |
 | 显式指定语言 | `language=<language>` 可强制所有标题和用户可见输出使用同一种语言。 |
 | Token 控制 | 运行环境支持模型选择时，优先使用低消耗模型，并只读取精简的会话上下文。 |
-| 范围保护 | 排除 ChatGPT 对话和子代理会话。 |
+| 范围保护 | 排除 ChatGPT 对话、claude.ai 云端会话和子代理会话。 |
 | 不创建自动化 | 只有你明确调用 Skill 时才会执行。 |
 
 ## 命名与语言规则
@@ -70,7 +70,7 @@ language=ja
   - 终端或 IDE 里的 Claude Code，会话记录位于 `~/.claude/projects`（或 `$CLAUDE_CONFIG_DIR/projects`）。
 - Node.js 20 或更高版本。读取压缩后的会话记录需要 Node.js 22.15+ / 23.8+；更早的版本需要 `PATH` 中有 `zstd` 命令。
 - `sqlite3` 已加入 `PATH`（仅 Codex 需要）。
-- 已在 macOS 上测试。
+- 已在 macOS 上测试。Windows（`%APPDATA%\Claude\claude-code-sessions`）和 Linux（`~/.config/Claude/claude-code-sessions`）上的 Claude 桌面 App 会话目录是按惯例推断的，未经测试。
 
 ## 告诉 Codex 安装
 
@@ -122,13 +122,21 @@ git clone https://github.com/RuntianLee/codex-session-renamer ~/.claude/skills/c
 
 ## 工作原理
 
-1. 按 Codex 的 `recency_at_ms` 倒序排列根会话；每个标题的日期单独按该会话的有效对话时间计算。
-2. 用 SQLite 只读模式查询当前批次，最多 20 个会话；以会话索引中时间最新的标题校验，返回 `batchCompliant` 和 `noncompliantCount`。
-3. 如果返回的标题全部合规，立即停止。
-4. 如果存在任一不合规标题，保存该批 ID 和下一批 offset，按这些固定 ID 读取上下文并重命名整批。
-5. 对归档任务临时解除归档，重命名后恢复原状态；写入失败时也恢复归档状态。
-6. 按同一批 ID 复查实际标题和归档状态；未持久化的写入重试一次，仍失败则报告并停止。
-7. 修复批次验证通过后，按原先保存的 offset 继续；遇到下一批原本就全合规的标题或到达末尾时停止。
+1. 确定标题模板：首次运行时提供预设供选择，之后使用已保存的模板。
+2. 根据当前运行的客户端确定平台，再把该平台的根会话按从新到旧排列：
+
+   | 平台 | 会话范围 | 排序依据 | 当前标题来源 |
+   | --- | --- | --- | --- |
+   | `codex` | Codex 根会话 | App 的 `recency_at_ms` | `session_index.jsonl` 中时间最新的记录，没有时用 SQLite |
+   | `claude-desktop` | 有本地会话记录的 Code 会话，取自唯一有会话的那个桌面 App 账号 | App 中的最后活跃时间 | 桌面 App 显示的标题 |
+   | `claude-cli` | 不属于任何桌面 App 账号、且包含用户目标的终端或 IDE 会话记录 | 会话记录文件的修改时间 | 最新一条 `custom-title` 记录 |
+
+3. 每批最多检查 20 个会话，返回 `batchCompliant` 和 `noncompliantCount`；每个标题的日期单独按该会话的有效对话时间计算。
+4. 如果返回的标题全部合规，立即停止。
+5. 如果存在任一不合规标题，保存该批 ID 和下一批 offset，按这些固定 ID 读取上下文并重命名整批：Codex 用 `set_thread_title`，桌面 App 用 `set_session_title`，终端用 `claude-cli-rename.mjs`。
+6. 对已归档的 Codex 会话或桌面 App 会话临时解除归档，重命名后恢复原状态；写入失败时也恢复归档状态。你在桌面 App 中拒绝的改名记为跳过。
+7. 按同一批 ID 复查实际标题和归档状态；未持久化的写入重试一次，仍失败则报告并停止。
+8. 修复批次验证通过后，按原先保存的 offset 继续；遇到下一批原本就全合规的标题或到达末尾时停止。
 
 ## `agents/` 和 `scripts/` 是做什么的
 
@@ -140,7 +148,7 @@ git clone https://github.com/RuntianLee/codex-session-renamer ~/.claude/skills/c
 - 简短说明；
 - 启动时显示的示例提示词。
 
-它用于改善 Codex 中的使用体验，不负责扫描或重命名会话。
+它用于改善 Codex 中的使用体验，不负责扫描或重命名会话。Claude Code 不读取这个文件，名称和说明取自 `SKILL.md` 开头的 front matter。
 
 ### `scripts/`
 
@@ -148,15 +156,14 @@ git clone https://github.com/RuntianLee/codex-session-renamer ~/.claude/skills/c
 
 简单来说，脚本会：
 
-1. 从 Codex 本地会话列表中找出普通根会话；
-2. 跳过 ChatGPT 对话和子代理会话；
-3. 使用 `session_index.jsonl` 中时间最新的名称修正数据库里的旧标题，再打开当前批次的本地会话，只保留最后有效对话日期、当前标题、从会话全过程分层抽取的最多四条用户要求，以及最后一条非进度类结果；
-4. 去掉附带的 Skill 原文、代码块和页面标记等无关内容；
-5. 支持轻量 `--check-only` 检查，不输出会话上下文，并与完整模式使用同一套日期计算方法。
+1. 按“工作原理”中的规则找出当前平台的根会话，跳过 ChatGPT 对话、没有本地会话记录的 claude.ai 云端会话和子代理会话；
+2. 打开当前批次的 Codex 会话记录或 Claude Code 会话记录，只保留最后有效对话日期、当前标题、从会话全过程分层抽取的最多四条用户要求，以及最后一条非进度类结果；
+3. 去掉附带的 Skill 原文、代码块和页面标记等无关内容；在 Claude Code 会话记录中，还会跳过工具结果、思考过程、sidechain 和注入的条目、上下文压缩摘要、`<system-reminder>` 块、不带参数的 slash 命令和命令输出；
+4. 支持轻量 `--check-only` 检查，不输出会话上下文，并与完整模式使用同一套日期计算方法。
 
 采集器只读取本地文件。它不会自己决定标题、修改数据库或执行重命名。Codex 和 Claude 桌面 App 的标题由各自的官方会话工具写入。只有两个脚本会写文件：`title-template.mjs` 只写自己的配置文件，`claude-cli-rename.mjs` 只向单个终端会话记录追加一条 `custom-title` 记录。采集器按已保存的模板（或单次传入的 `--template`）检查标题，并返回每个会话的 `titlePrefix` 和 `titleSuffix`。
 
-采集器会拒绝未知参数和非法数值。`--limit` 接受 1–20，`--offset` 接受非负整数。读取或复查已选定批次时，用 `--ids id1,id2,...` 固定身份，保持传入顺序，并要求所有 ID 都对应现存根会话；它不能与位置分页参数混用。两种选择方式均可加 `--check-only`。历史字符串消息内容可以读取，无关或不完整 JSON 记录会跳过。Codex 会把较旧的会话记录压缩为 `<rollout_path>.zst`，此时采集器改读压缩文件；未压缩的原文件始终优先。
+采集器会拒绝未知参数和非法数值。`--limit` 接受 1–20，`--offset` 接受非负整数。读取或复查已选定批次时，用 `--ids id1,id2,...` 固定身份，保持传入顺序，并要求所有 ID 都对应现存根会话；它不能与位置分页参数混用。两种选择方式均可加 `--check-only`。历史字符串消息内容可以读取，无关或不完整 JSON 记录会跳过。Codex 会把较旧的会话记录压缩为 `<rollout_path>.zst`，此时采集器改读压缩文件；未压缩的原文件始终优先。如果 Codex 已退出，而采集器又不能在 `state_5.sqlite` 所在目录写文件（例如在沙箱中运行），它会以 immutable 只读方式打开已完整落盘的数据库；如果还留有 `-wal` 文件，则报错停止。在桌面 App 中，采集器只读取一个账号的会话；如果多个账号都有会话，它会停止并要求传入 `--desktop-dir <account>/<organization>`。
 
 运行测试：`node --test tests/`。
 

@@ -18,7 +18,7 @@ Manually repair recent root Codex and Claude Code session titles as `YYYY-MM-DDï
 | Conversation-aware language | By default, each title follows its own session's dominant user language. |
 | Optional language | `language=<language>` forces one language for all titles and user-visible output. |
 | Token efficiency | Prefers a token-efficient model when model selection is available and uses compact session context. |
-| Scope protection | Excludes ChatGPT conversations and subagent sessions. |
+| Scope protection | Excludes ChatGPT conversations, claude.ai cloud sessions, and subagent sessions. |
 | No automation | Runs only when you explicitly invoke the Skill. |
 
 ## Naming and language behavior
@@ -70,7 +70,7 @@ The selected language applies to every generated title and all user-visible outp
   - Claude Code in a terminal or IDE, with transcripts under `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects`).
 - Node.js 20 or newer. Reading compressed rollouts needs Node.js 22.15+ / 23.8+, or the `zstd` command on `PATH` for older versions.
 - `sqlite3` available on `PATH` (Codex only).
-- Tested on macOS.
+- Tested on macOS. The Claude desktop app's session folder on Windows (`%APPDATA%\Claude\claude-code-sessions`) and Linux (`~/.config/Claude/claude-code-sessions`) is assumed, not tested.
 
 ## Install with Codex
 
@@ -122,13 +122,21 @@ You can also ask it to change or reset the template; it previews the result and 
 
 ## How it works
 
-1. Orders root sessions by the app's `recency_at_ms`, newest first. Each title's date is calculated separately from that session's meaningful conversation timestamps.
-2. Queries at most 20 sessions in SQLite read-only mode, reconciles titles with the newest dated session index entry, and returns `batchCompliant` plus `noncompliantCount`.
-3. Stops immediately when every returned title is compliant.
-4. If any title is invalid, retains the checked batch's IDs and next offset, reads context by those exact IDs, and renames every session in that batch.
-5. Temporarily unarchives archived tasks, renames them, and restores their original archive state even if a write fails.
-6. Rechecks those same IDs, verifying the actual titles and archive states. Retries an unpersisted write once and reports any remaining failure.
-7. After a repaired batch passes verification, continues from its saved next offset until the next initially checked batch is compliant or the end is reached.
+1. Settles the title template: offers presets on first run, or uses the saved one.
+2. Picks the platform from the client running it, then orders that platform's root sessions newest first:
+
+   | Platform | Sessions | Order | Current title |
+   | --- | --- | --- | --- |
+   | `codex` | Root Codex threads | The app's `recency_at_ms` | Newest dated `session_index.jsonl` entry, else SQLite |
+   | `claude-desktop` | Code sessions with a local transcript, from the one desktop account that has sessions | Last activity in the app | The app's title |
+   | `claude-cli` | Terminal and IDE transcripts that no desktop account owns and that contain a user goal | Transcript modification time | Latest `custom-title` record |
+
+3. Checks at most 20 sessions and returns `batchCompliant` plus `noncompliantCount`. Each title's date is calculated separately from that session's meaningful conversation timestamps.
+4. Stops immediately when every returned title is compliant.
+5. If any title is invalid, retains the checked batch's IDs and next offset, reads context by those exact IDs, and renames every session in that batch: `set_thread_title` in Codex, `set_session_title` in the desktop app, or `claude-cli-rename.mjs` in a terminal.
+6. Temporarily unarchives archived Codex threads or desktop sessions, renames them, and restores their original archive state even if a write fails. A desktop rename you decline is reported as skipped.
+7. Rechecks those same IDs, verifying the actual titles and archive states. Retries an unpersisted write once and reports any remaining failure.
+8. After a repaired batch passes verification, continues from its saved next offset until the next initially checked batch is compliant or the end is reached.
 
 ## What `agents/` and `scripts/` do
 
@@ -140,7 +148,7 @@ This folder contains `openai.yaml`. It tells Codex how to display the Skill:
 - its short description;
 - the example prompt shown when starting it.
 
-It improves the experience in Codex, but it does not scan or rename sessions.
+It improves the experience in Codex, but it does not scan or rename sessions. Claude Code ignores it and reads the name and description from the front matter of `SKILL.md`.
 
 ### `scripts/`
 
@@ -148,15 +156,14 @@ This folder contains the helpers that check titles and prepare session informati
 
 In simple terms, the script:
 
-1. finds normal root sessions in Codex's local session list;
-2. skips ChatGPT conversations and subagent sessions;
-3. reconciles stale database titles with the newest dated name in `session_index.jsonl`, then opens each selected conversation and keeps only the last meaningful conversation date, current title, up to four user requests sampled across the conversation, and the latest non-commentary outcome;
-4. removes noisy content such as attached Skill text, code blocks, and page markup;
-5. supports a lightweight `--check-only` pass that emits no conversation context while using the same date calculation as full mode.
+1. finds the platform's root sessions as listed in How it works, skipping ChatGPT conversations, claude.ai cloud sessions without a local transcript, and subagent sessions;
+2. opens each selected Codex rollout or Claude Code transcript and keeps only the last meaningful conversation date, current title, up to four user requests sampled across the conversation, and the latest non-commentary outcome;
+3. removes noisy content such as attached Skill text, code blocks, and page markup; in Claude Code transcripts it also skips tool results, thinking, sidechain and injected entries, compaction summaries, `<system-reminder>` blocks, slash commands without arguments, and command output;
+4. supports a lightweight `--check-only` pass that emits no conversation context while using the same date calculation as full mode.
 
 The collector only reads local files. It does not decide the new title, change the database, or rename anything by itself. Codex and the Claude desktop app write titles through their official session tools. Two scripts write: `title-template.mjs` saves only its own config file, and `claude-cli-rename.mjs` only appends a `custom-title` record to one terminal transcript. The collector applies the saved template, or a one-off `--template`, and returns each session's `titlePrefix` and `titleSuffix`.
 
-The collector rejects unknown options and invalid numeric arguments. `--limit` accepts 1-20 and `--offset` accepts a nonnegative integer. Use `--ids id1,id2,...` instead of positional pagination when reading or verifying an already checked batch; it preserves ID order and requires every requested root session to exist. `--check-only` can be combined with either selection mode. Legacy string message content is supported, and unrelated or incomplete JSON records are ignored. When Codex has compressed an older rollout to `<rollout_path>.zst`, the collector reads that archive instead; an uncompressed rollout always takes precedence.
+The collector rejects unknown options and invalid numeric arguments. `--limit` accepts 1-20 and `--offset` accepts a nonnegative integer. Use `--ids id1,id2,...` instead of positional pagination when reading or verifying an already checked batch; it preserves ID order and requires every requested root session to exist. `--check-only` can be combined with either selection mode. Legacy string message content is supported, and unrelated or incomplete JSON records are ignored. When Codex has compressed an older rollout to `<rollout_path>.zst`, the collector reads that archive instead; an uncompressed rollout always takes precedence. If Codex has exited and the collector cannot write next to `state_5.sqlite` (for example in a sandbox), it opens the fully checkpointed database read-only in immutable mode; a leftover `-wal` file stops the run instead. In the desktop app, the collector reads one account's sessions; if several accounts have sessions it stops and asks for `--desktop-dir <account>/<organization>`.
 
 Run the tests with `node --test tests/`.
 

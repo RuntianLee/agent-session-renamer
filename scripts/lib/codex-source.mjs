@@ -1,14 +1,30 @@
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import zlib from "node:zlib";
 import { Conversation, cleanText, meaningfulUserGoal, parseJsonLines, readIfPresent } from "./context.mjs";
+
+function runSQLite(target, query) {
+  return execFileSync("sqlite3", ["-readonly", "-json", target, query], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
 
 function readSQLite(db, query) {
   let raw;
   try {
-    raw = execFileSync("sqlite3", ["-readonly", "-json", db, query], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    try {
+      raw = runSQLite(db, query);
+    } catch (error) {
+      // Once Codex exits, its WAL-mode database keeps no -shm file, and a
+      // read-only connection cannot create one where the folder is not
+      // writable, as in a sandboxed run. Without a -wal file every change is
+      // already in the main file and no writer is active, so an immutable
+      // read sees the complete, current state.
+      if (!existsSync(db) || existsSync(`${db}-wal`)) throw error;
+      raw = runSQLite(`${pathToFileURL(db).href}?mode=ro&immutable=1`, query);
+    }
   } catch (error) {
     const code = error.code || (Number.isInteger(error.status) ? `exit ${error.status}` : "query error");
     throw new Error(`SQLite metadata query failed (${code})`);

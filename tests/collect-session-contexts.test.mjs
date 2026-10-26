@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -840,5 +840,36 @@ test("claude-cli skips command-only transcripts and checks ownership across acco
       assert.match(error.stderr, /belongs to the desktop app/);
       return true;
     });
+  });
+});
+
+test("a closed WAL-mode Codex database in a read-only folder is still readable", () => {
+  fixture(({ db, dir, invoke }) => {
+    execFileSync("sqlite3", [db, "PRAGMA journal_mode=WAL; INSERT INTO threads VALUES ('session','',1,1000,1,'1970-01-01｜Closed WAL database title',0,'user'); PRAGMA wal_checkpoint(TRUNCATE);"]);
+    // What an exited app leaves behind: a WAL-mode file with no -wal or -shm.
+    rmSync(`${db}-wal`, { force: true });
+    rmSync(`${db}-shm`, { force: true });
+    chmodSync(dir, 0o555);
+    try {
+      assert.throws(() => execFileSync("sqlite3", ["-readonly", db, "SELECT 1;"], { stdio: "pipe" }));
+      const result = JSON.parse(invoke(["--check-only"]));
+      assert.equal(result.total, 1);
+      assert.equal(result.sessions[0].compliant, true);
+      assert.equal(existsSync(`${db}-shm`), false);
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+
+    // A leftover -wal may hold unmerged writes, so an immutable read is unsafe.
+    writeFileSync(`${db}-wal`, "");
+    chmodSync(dir, 0o555);
+    try {
+      assert.throws(() => invoke(["--check-only"]), error => {
+        assert.match(error.stderr, /SQLite metadata query failed/);
+        return true;
+      });
+    } finally {
+      chmodSync(dir, 0o755);
+    }
   });
 });

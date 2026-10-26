@@ -39,7 +39,14 @@ function transcriptIndex(claudeDir) {
       const id = basename(file.name, ".jsonl");
       if (!file.isFile() || !file.name.endsWith(".jsonl") || !SESSION_UUID.test(id)) continue;
       const path = join(projects, project.name, file.name);
-      index.set(id, { path, modifiedAtMs: statSync(path).mtimeMs });
+      let modifiedAtMs;
+      try {
+        modifiedAtMs = statSync(path).mtimeMs;
+      } catch (error) {
+        if (error.code === "ENOENT") continue; // Removed after the listing.
+        throw new Error(`transcript listing failed (${error.code || "read error"})`);
+      }
+      index.set(id, { path, modifiedAtMs });
     }
   }
   return index;

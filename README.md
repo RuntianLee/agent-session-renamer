@@ -1,8 +1,10 @@
-# codex-session-renamer
+# agent-session-renamer
 
 [English](README.md) | [中文](README.zh-CN.md)
 
 Manually repair recent root Codex and Claude Code session titles as `YYYY-MM-DD｜Core topic summary` (or your own template), scanning newest-first and stopping at the first fully compliant batch.
+
+Formerly `codex-session-renamer`; see [Upgrading from codex-session-renamer](#upgrading-from-codex-session-renamer).
 
 > **Disclaimer.** Each noncompliant batch is fully renamed and there is no built-in rollback. Read [SKILL.md](SKILL.md) before using it.
 
@@ -31,7 +33,7 @@ YYYY-MM-DD｜Core topic summary
 
 ### Title template
 
-On first run the Skill offers these presets and saves your choice to `~/.config/codex-session-renamer/config.json` (or `$XDG_CONFIG_HOME/codex-session-renamer/config.json`):
+On first run the Skill offers these presets and saves your choice to `~/.config/agent-session-renamer/config.json` (or `$XDG_CONFIG_HOME/agent-session-renamer/config.json`):
 
 | Preset | Template | Example |
 | --- | --- | --- |
@@ -77,7 +79,7 @@ The selected language applies to every generated title and all user-visible outp
 Tell Codex:
 
 ```text
-Install the codex-session-renamer Skill from the root of https://github.com/RuntianLee/codex-session-renamer.
+Install the agent-session-renamer Skill from the root of https://github.com/RuntianLee/agent-session-renamer.
 ```
 
 Codex will use its built-in Skill Installer to place the Skill under `$CODEX_HOME/skills`. The installed Skill becomes available on the next turn.
@@ -87,25 +89,35 @@ Codex will use its built-in Skill Installer to place the Skill under `$CODEX_HOM
 Clone the repository into your personal skills folder; the desktop app's Code tab and terminal Claude Code both read it:
 
 ```bash
-git clone https://github.com/RuntianLee/codex-session-renamer ~/.claude/skills/codex-session-renamer
+git clone https://github.com/RuntianLee/agent-session-renamer ~/.claude/skills/agent-session-renamer
 ```
 
-Then run `/codex-session-renamer` or ask Claude to repair recent session titles. The Skill detects whether it runs in the desktop app or a terminal; `platform=claude-desktop` or `platform=claude-cli` overrides that.
+Then run `/agent-session-renamer` or ask Claude to repair recent session titles. The Skill detects whether it runs in the desktop app or a terminal; `platform=claude-desktop` or `platform=claude-cli` overrides that.
+
+## Upgrading from codex-session-renamer
+
+The Skill was renamed when it gained Claude Code support. The old GitHub address redirects here, but an installed copy keeps its old folder and name, so reinstall it:
+
+1. Delete the old folder: `~/.codex/skills/codex-session-renamer` (or under `$CODEX_HOME/skills`) for Codex, `~/.claude/skills/codex-session-renamer` for Claude Code. Keeping both makes the same Skill appear twice.
+2. Install again as described above.
+3. Invoke it as `$agent-session-renamer` in Codex or `/agent-session-renamer` in Claude Code.
+
+A template saved by the old version in `~/.config/codex-session-renamer/config.json` keeps working; the next template you save goes to `~/.config/agent-session-renamer/config.json`.
 
 ## Usage
 
-The examples use Codex's `$codex-session-renamer`. In Claude Code, type `/codex-session-renamer` followed by the same options, for example `/codex-session-renamer language=English`.
+The examples use Codex's `$agent-session-renamer`. In Claude Code, type `/agent-session-renamer` followed by the same options, for example `/agent-session-renamer language=English`.
 
 ### Automatically choose languages
 
 ```text
-Use $codex-session-renamer to repair recent root Codex session titles.
+Use $agent-session-renamer to repair recent root Codex session titles.
 ```
 
 ### Force one language
 
 ```text
-Use $codex-session-renamer language=English to repair recent root Codex session titles.
+Use $agent-session-renamer language=English to repair recent root Codex session titles.
 ```
 
 Replace `English` with a language name or BCP-47 tag such as `zh-CN` or `ja`.
@@ -113,7 +125,7 @@ Replace `English` with a language name or BCP-47 tag such as `zh-CN` or `ja`.
 ### Change the title template
 
 ```text
-Use $codex-session-renamer template={date:MM-DD}｜{topic} to repair recent root Codex session titles.
+Use $agent-session-renamer template={date:MM-DD}｜{topic} to repair recent root Codex session titles.
 ```
 
 You can also ask it to change or reset the template; it previews the result and confirms before saving.

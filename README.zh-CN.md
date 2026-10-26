@@ -1,8 +1,10 @@
-# codex-session-renamer
+# agent-session-renamer
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-手动修复近期 Codex 和 Claude Code 根会话标题，统一生成 `YYYY-MM-DD｜核心内容总结`（也可以换成自己的模板）。按 Codex 的会话活跃时间从新到旧扫描，遇到首个全合规批次就停止；标题日期单独按有效对话时间计算。
+手动修复近期 Codex 和 Claude Code 根会话标题，统一生成 `YYYY-MM-DD｜核心内容总结`（也可以换成自己的模板）。按会话活跃时间从新到旧扫描，遇到首个全合规批次就停止；标题日期单独按有效对话时间计算。
+
+原名 `codex-session-renamer`，升级方法见[从 codex-session-renamer 升级](#从-codex-session-renamer-升级)。
 
 > **免责声明。** 只要一个批次中存在不合规标题，就会重命名该批全部会话，且没有内置回滚功能。使用前请先阅读 [SKILL.md](SKILL.md)。
 
@@ -31,7 +33,7 @@ YYYY-MM-DD｜核心内容总结
 
 ### 标题模板
 
-首次运行时，Skill 会提供下面几个预设，并把你的选择保存到 `~/.config/codex-session-renamer/config.json`（设置了 `XDG_CONFIG_HOME` 时为 `$XDG_CONFIG_HOME/codex-session-renamer/config.json`）：
+首次运行时，Skill 会提供下面几个预设，并把你的选择保存到 `~/.config/agent-session-renamer/config.json`（设置了 `XDG_CONFIG_HOME` 时为 `$XDG_CONFIG_HOME/agent-session-renamer/config.json`）：
 
 | 预设 | 模板 | 示例 |
 | --- | --- | --- |
@@ -77,7 +79,7 @@ language=ja
 直接告诉 Codex：
 
 ```text
-请从 https://github.com/RuntianLee/codex-session-renamer 仓库根目录安装 codex-session-renamer Skill。
+请从 https://github.com/RuntianLee/agent-session-renamer 仓库根目录安装 agent-session-renamer Skill。
 ```
 
 Codex 会使用内置的 Skill Installer，把 Skill 安装到 `$CODEX_HOME/skills`。安装完成后，下一轮对话即可使用。
@@ -87,25 +89,35 @@ Codex 会使用内置的 Skill Installer，把 Skill 安装到 `$CODEX_HOME/skil
 把仓库克隆到个人 skills 目录，桌面 App 的 Code 页和终端里的 Claude Code 都会读取它：
 
 ```bash
-git clone https://github.com/RuntianLee/codex-session-renamer ~/.claude/skills/codex-session-renamer
+git clone https://github.com/RuntianLee/agent-session-renamer ~/.claude/skills/agent-session-renamer
 ```
 
-之后运行 `/codex-session-renamer`，或者直接让 Claude 修复近期会话标题。Skill 会自动判断当前是在桌面 App 还是终端里运行；也可以用 `platform=claude-desktop` 或 `platform=claude-cli` 指定。
+之后运行 `/agent-session-renamer`，或者直接让 Claude 修复近期会话标题。Skill 会自动判断当前是在桌面 App 还是终端里运行；也可以用 `platform=claude-desktop` 或 `platform=claude-cli` 指定。
+
+## 从 codex-session-renamer 升级
+
+增加 Claude Code 支持后，这个 Skill 改了名。旧的 GitHub 地址会自动跳转到这里，但已安装的副本仍是旧目录和旧名称，需要重新安装：
+
+1. 删除旧目录：Codex 的是 `~/.codex/skills/codex-session-renamer`（或 `$CODEX_HOME/skills` 下的同名目录），Claude Code 的是 `~/.claude/skills/codex-session-renamer`。两个都留着的话，同一个 Skill 会出现两次。
+2. 按上文重新安装。
+3. 调用方式改为 Codex 中的 `$agent-session-renamer`、Claude Code 中的 `/agent-session-renamer`。
+
+旧版本保存在 `~/.config/codex-session-renamer/config.json` 的模板会继续生效；之后再保存模板时，会写到 `~/.config/agent-session-renamer/config.json`。
 
 ## 使用方法
 
-下面的示例使用 Codex 的 `$codex-session-renamer`。在 Claude Code 中改用 `/codex-session-renamer`，参数写法相同，例如 `/codex-session-renamer language=English`。
+下面的示例使用 Codex 的 `$agent-session-renamer`。在 Claude Code 中改用 `/agent-session-renamer`，参数写法相同，例如 `/agent-session-renamer language=English`。
 
 ### 自动判断语言
 
 ```text
-使用 $codex-session-renamer 修复近期 Codex 根会话标题。
+使用 $agent-session-renamer 修复近期 Codex 根会话标题。
 ```
 
 ### 强制使用同一种语言
 
 ```text
-使用 $codex-session-renamer language=English 修复近期 Codex 根会话标题。
+使用 $agent-session-renamer language=English 修复近期 Codex 根会话标题。
 ```
 
 可将 `English` 换成语言名称或 BCP-47 标签，例如 `zh-CN`、`ja`。
@@ -113,7 +125,7 @@ git clone https://github.com/RuntianLee/codex-session-renamer ~/.claude/skills/c
 ### 更换标题模板
 
 ```text
-使用 $codex-session-renamer template={date:MM-DD}｜{topic} 修复近期 Codex 根会话标题。
+使用 $agent-session-renamer template={date:MM-DD}｜{topic} 修复近期 Codex 根会话标题。
 ```
 
 也可以直接说“更换模板”或“重设模板”；Skill 会先预览效果，确认后再保存。

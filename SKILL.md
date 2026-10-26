@@ -1,17 +1,17 @@
 ---
-name: codex-session-renamer
+name: agent-session-renamer
 description: Use for a manual, token-efficient scan that repairs recent Codex or Claude Code session titles until a fully compliant batch is reached.
 ---
 
-# Codex Session Renamer
+# Agent Session Renamer
 
 Generate semantic titles from the dominant theme across the full conversation arc, refined by the actual outcome or final conclusion. Never use a raw first message, command, URL, or long prompt as the topic.
 
-Invoking `$codex-session-renamer` (or `/codex-session-renamer` in Claude Code) scans root sessions of the current client from newest to oldest in batches of 20. A batch containing any noncompliant title is fully resummarized and renamed. The first fully compliant batch stops the run, so older sessions are not inspected.
+Invoking `$agent-session-renamer` (or `/agent-session-renamer` in Claude Code) scans root sessions of the current client from newest to oldest in batches of 20. A batch containing any noncompliant title is fully resummarized and renamed. The first fully compliant batch stops the run, so older sessions are not inspected.
 
 ## Platform and Scripts
 
-`<skill-dir>` below is the directory that contains this SKILL.md, such as `~/.codex/skills/codex-session-renamer` or `~/.claude/skills/codex-session-renamer`. Run every script by its absolute path there so the working directory does not matter.
+`<skill-dir>` below is the directory that contains this SKILL.md, such as `~/.codex/skills/agent-session-renamer` or `~/.claude/skills/agent-session-renamer`. Run every script by its absolute path there so the working directory does not matter.
 
 Pick the platform from the client running this skill; an optional `platform=<platform>` in the invocation overrides it.
 

@@ -16,9 +16,17 @@ export const PRESETS = [
   { id: "dotted", template: "{date:YYYY.MM.DD} {topic}" },
 ];
 
+function configHome() {
+  return process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+}
+
 export function defaultConfigPath() {
-  const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-  return join(base, "codex-session-renamer", "config.json");
+  return join(configHome(), "agent-session-renamer", "config.json");
+}
+
+// Where releases before the agent-session-renamer rename saved the template.
+function legacyConfigPath() {
+  return join(configHome(), "codex-session-renamer", "config.json");
 }
 
 const length = value => Array.from(value).length;
@@ -128,8 +136,10 @@ export function readConfig(path) {
   try {
     raw = readFileSync(path, "utf8");
   } catch (error) {
-    if (error.code === "ENOENT") return { configured: false, template: DEFAULT_TEMPLATE };
-    throw new Error(`config read failed (${error.code || "read error"})`);
+    if (error.code !== "ENOENT") throw new Error(`config read failed (${error.code || "read error"})`);
+    // Keep a template saved under the old name until a new one is saved.
+    if (path === defaultConfigPath()) return readConfig(legacyConfigPath());
+    return { configured: false, template: DEFAULT_TEMPLATE };
   }
   let config;
   try {

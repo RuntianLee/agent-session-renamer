@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-手动修复近期 Codex 根会话标题，统一生成 `YYYY-MM-DD｜核心内容总结`（也可以换成自己的模板）。按 Codex 的会话活跃时间从新到旧扫描，遇到首个全合规批次就停止；标题日期单独按有效对话时间计算。
+手动修复近期 Codex 和 Claude Code 根会话标题，统一生成 `YYYY-MM-DD｜核心内容总结`（也可以换成自己的模板）。按 Codex 的会话活跃时间从新到旧扫描，遇到首个全合规批次就停止；标题日期单独按有效对话时间计算。
 
 > **免责声明。** 只要一个批次中存在不合规标题，就会重命名该批全部会话，且没有内置回滚功能。使用前请先阅读 [SKILL.md](SKILL.md)。
 
@@ -10,6 +10,7 @@
 
 | 能力 | 行为 |
 | --- | --- |
+| Codex 与 Claude Code | 可在 Codex、Claude 桌面 App 的 Code 页，以及终端或 IDE 里的 Claude Code 中使用。 |
 | 语义化标题 | 根据完整会话的目标演进识别核心主题，再用实际结果补充。 |
 | 最后对话日期 | 按系统当前时区，在标题中加入对应会话最后一次有效对话的日期。 |
 | 手动增量执行 | 每批检查 20 条；发现任一不合规标题就重命名整批，首个全合规批次立即停止。 |
@@ -63,10 +64,12 @@ language=ja
 
 ## 环境要求
 
-- OpenAI Codex，并且可以使用本地会话管理工具。
-- 本地存在 `~/.codex/state_5.sqlite` 会话目录。
+- 以下任一环境：
+  - OpenAI Codex，可以使用本地会话管理工具，并且本地存在 `~/.codex/state_5.sqlite` 会话目录；
+  - Claude 桌面 App 的 Code 页，用它的 `set_session_title` 工具改名；
+  - 终端或 IDE 里的 Claude Code，会话记录位于 `~/.claude/projects`（或 `$CLAUDE_CONFIG_DIR/projects`）。
 - Node.js 20 或更高版本。读取压缩后的会话记录需要 Node.js 22.15+ / 23.8+；更早的版本需要 `PATH` 中有 `zstd` 命令。
-- `sqlite3` 已加入 `PATH`。
+- `sqlite3` 已加入 `PATH`（仅 Codex 需要）。
 - 已在 macOS 上测试。
 
 ## 告诉 Codex 安装
@@ -79,7 +82,19 @@ language=ja
 
 Codex 会使用内置的 Skill Installer，把 Skill 安装到 `$CODEX_HOME/skills`。安装完成后，下一轮对话即可使用。
 
+## 在 Claude Code 中安装
+
+把仓库克隆到个人 skills 目录，桌面 App 的 Code 页和终端里的 Claude Code 都会读取它：
+
+```bash
+git clone https://github.com/RuntianLee/codex-session-renamer ~/.claude/skills/codex-session-renamer
+```
+
+之后运行 `/codex-session-renamer`，或者直接让 Claude 修复近期会话标题。Skill 会自动判断当前是在桌面 App 还是终端里运行；也可以用 `platform=claude-desktop` 或 `platform=claude-cli` 指定。
+
 ## 使用方法
+
+下面的示例使用 Codex 的 `$codex-session-renamer`。在 Claude Code 中改用 `/codex-session-renamer`，参数写法相同，例如 `/codex-session-renamer language=English`。
 
 ### 自动判断语言
 
@@ -129,7 +144,7 @@ Codex 会使用内置的 Skill Installer，把 Skill 安装到 `$CODEX_HOME/skil
 
 ### `scripts/`
 
-这个文件夹存放检查标题并为 Codex 准备会话信息的辅助脚本。
+这个文件夹存放检查标题、准备会话信息的辅助脚本。`collect-session-contexts.mjs --platform codex|claude-desktop|claude-cli` 分别读取 Codex 的会话目录、Claude 桌面 App 的会话列表或终端 Claude Code 的会话记录；各平台的读取逻辑在 `scripts/lib/` 里。
 
 简单来说，脚本会：
 
@@ -139,7 +154,7 @@ Codex 会使用内置的 Skill Installer，把 Skill 安装到 `$CODEX_HOME/skil
 4. 去掉附带的 Skill 原文、代码块和页面标记等无关内容；
 5. 支持轻量 `--check-only` 检查，不输出会话上下文，并与完整模式使用同一套日期计算方法。
 
-采集器只读取本地文件。它不会自己决定标题、修改数据库或执行重命名。真正的标题写入由 Codex 官方会话工具完成。`title-template.mjs` 负责展示预设、预览模板和保存选择，它是唯一会写文件的脚本，而且只写自己的配置文件。采集器按已保存的模板（或单次传入的 `--template`）检查标题，并返回每个会话的 `titlePrefix` 和 `titleSuffix`。
+采集器只读取本地文件。它不会自己决定标题、修改数据库或执行重命名。Codex 和 Claude 桌面 App 的标题由各自的官方会话工具写入。只有两个脚本会写文件：`title-template.mjs` 只写自己的配置文件，`claude-cli-rename.mjs` 只向单个终端会话记录追加一条 `custom-title` 记录。采集器按已保存的模板（或单次传入的 `--template`）检查标题，并返回每个会话的 `titlePrefix` 和 `titleSuffix`。
 
 采集器会拒绝未知参数和非法数值。`--limit` 接受 1–20，`--offset` 接受非负整数。读取或复查已选定批次时，用 `--ids id1,id2,...` 固定身份，保持传入顺序，并要求所有 ID 都对应现存根会话；它不能与位置分页参数混用。两种选择方式均可加 `--check-only`。历史字符串消息内容可以读取，无关或不完整 JSON 记录会跳过。Codex 会把较旧的会话记录压缩为 `<rollout_path>.zst`，此时采集器改读压缩文件；未压缩的原文件始终优先。
 
@@ -151,9 +166,9 @@ Codex 会使用内置的 Skill Installer，把 Skill 安装到 `$CODEX_HOME/skil
 | --- | --- |
 | 会话内容 | 只在本地读取，用于提取精简的命名上下文。 |
 | 数据库 | 只查询会话元数据，不直接向 SQLite 写入标题。 |
-| 重命名 | 使用 Codex 官方会话工具。 |
+| 重命名 | Codex 和 Claude 桌面 App 使用各自的官方会话工具。终端里的 Claude Code 会话，只在会话记录末尾追加一条 `custom-title` 记录（与 Claude Agent SDK 的 `renameSession()` 写入的记录相同），记录里的其他内容不变。 |
 | 归档任务 | 重命名后恢复原来的归档状态。 |
-| 排除范围 | 永不选择 ChatGPT 对话和子代理会话。 |
+| 排除范围 | 永不选择 ChatGPT 对话、claude.ai 云端会话和子代理会话。终端模式拒绝修改归桌面 App 管理的会话。 |
 | 自动化 | 永不创建或更新定时自动化。 |
 | 删除操作 | 永不删除会话、消息、记忆或项目文件。 |
 
@@ -169,7 +184,11 @@ Codex 会使用内置的 Skill Installer，把 Skill 安装到 `$CODEX_HOME/skil
 ├── scripts/
 │   ├── collect-session-contexts.mjs
 │   ├── title-template.mjs
+│   ├── claude-cli-rename.mjs
 │   └── lib/
+│       ├── claude-source.mjs
+│       ├── codex-source.mjs
+│       ├── context.mjs
 │       └── title-template.mjs
 └── tests/
     └── collect-session-contexts.test.mjs
@@ -178,7 +197,9 @@ Codex 会使用内置的 Skill Installer，把 Skill 安装到 `$CODEX_HOME/skil
 ## 已知限制
 
 - 标题质量取决于每个会话中可用的有效上下文。
-- 收集脚本依赖 Codex 当前的本地文件结构。
+- 收集脚本依赖 Codex、Claude 桌面 App 和 Claude Code 会话记录当前的本地文件结构。
+- 在 Claude 桌面 App 中，修改你自己设置过的标题时，每次都会请你确认（bypass permissions 模式除外）；被拒绝的改名记为跳过。
+- 桌面 App 和终端 Claude Code 各有一份会话列表。在桌面 App 里创建的会话在桌面 App 里改名；终端模式只处理其余会话。
 - 没有内置标题历史或自动回滚。
 - 只重命名保存在本机的会话。Codex 的会话存在本地，在一台电脑上改名后，另一台电脑上它自己的会话不会跟着变；需要在每台电脑上分别运行。手机等设备如果是通过 [connected host](https://openai.com/index/work-with-codex-from-anywhere/) 远程查看本机会话，读取的就是本机数据，刷新后能看到新标题。
 - 在网页、手机和桌面之间同步的 ChatGPT Work 对话与 Codex 历史是分开的（[OpenAI 文档](https://learn.chatgpt.com/docs/projects)），本 Skill 不会重命名它们。

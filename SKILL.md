@@ -1,13 +1,27 @@
 ---
 name: codex-session-renamer
-description: Use for a manual, token-efficient scan that repairs recent Codex session titles until a fully compliant batch is reached.
+description: Use for a manual, token-efficient scan that repairs recent Codex or Claude Code session titles until a fully compliant batch is reached.
 ---
 
 # Codex Session Renamer
 
 Generate semantic titles from the dominant theme across the full conversation arc, refined by the actual outcome or final conclusion. Never use a raw first message, command, URL, or long prompt as the topic.
 
-Invoking `$codex-session-renamer` scans root Codex sessions from newest to oldest in batches of 20. A batch containing any noncompliant title is fully resummarized and renamed. The first fully compliant batch stops the run, so older sessions are not inspected.
+Invoking `$codex-session-renamer` (or `/codex-session-renamer` in Claude Code) scans root sessions of the current client from newest to oldest in batches of 20. A batch containing any noncompliant title is fully resummarized and renamed. The first fully compliant batch stops the run, so older sessions are not inspected.
+
+## Platform and Scripts
+
+`<skill-dir>` below is the directory that contains this SKILL.md, such as `~/.codex/skills/codex-session-renamer` or `~/.claude/skills/codex-session-renamer`. Run every script by its absolute path there so the working directory does not matter.
+
+Pick the platform from the client running this skill; an optional `platform=<platform>` in the invocation overrides it.
+
+| Platform | Client | Sessions | Rename with |
+| --- | --- | --- | --- |
+| `codex` | Codex app, CLI, or IDE extension | Root Codex threads | `set_thread_title`; `set_thread_archived` for archived threads |
+| `claude-desktop` | Claude desktop app, Code tab (the `set_session_title` tool is available) | Code sessions the app lists, with a local transcript | `set_session_title`; `unarchive_session` and `archive_session` for archived sessions |
+| `claude-cli` | Claude Code in a terminal or IDE without `set_session_title` | Terminal transcripts that the desktop app does not own | `node <skill-dir>/scripts/claude-cli-rename.mjs --id '<id>' --title '<title>'` |
+
+Pass `--platform <platform>` to every collector call. Rename only through the listed method; never write titles into session files, databases, or app metadata yourself. `claude-cli-rename.mjs` appends the same `custom-title` record as the Claude Agent SDK's `renameSession()` and refuses sessions the desktop app owns. In the desktop app, `set_session_title` asks the user to approve each rename of a title they set themselves unless the session runs in bypass permissions mode; say so before the first batch.
 
 ## Language Selection
 
@@ -26,9 +40,9 @@ Titles follow a template with exactly one `{topic}` and at most one `{date}` or 
 Manage the template only through the helper:
 
 ```bash
-node ~/.codex/skills/codex-session-renamer/scripts/title-template.mjs show
-node ~/.codex/skills/codex-session-renamer/scripts/title-template.mjs preview --template '<template>'
-node ~/.codex/skills/codex-session-renamer/scripts/title-template.mjs save --template '<template>'
+node <skill-dir>/scripts/title-template.mjs show
+node <skill-dir>/scripts/title-template.mjs preview --template '<template>'
+node <skill-dir>/scripts/title-template.mjs save --template '<template>'
 ```
 
 - First run: when `show` reports `configured: false`, offer its presets with their examples and recommend `default`, which keeps the current format. Use the client's question tool when available. Save the user's choice, then continue. If the user cannot be asked, continue with the default without saving and mention `template=<template>` in the final report.
@@ -51,34 +65,34 @@ node ~/.codex/skills/codex-session-renamer/scripts/title-template.mjs save --tem
 ## Token Efficiency
 
 - When model selection is available, prefer a token-efficient model that can reliably follow the naming rules.
-- When model selection is unavailable, continue with the active Codex model; this skill cannot force a model change.
+- When model selection is unavailable, continue with the active model; this skill cannot force a model change.
 - Use only the compact collected context: at most four user goals sampled across the session plus the latest non-commentary outcome. Process at most 20 sessions per batch, and keep progress messages and the final report concise.
 
 ## Manual Incremental Workflow
 
 1. Resolve the optional language before generating any user-visible text.
 2. Run `title-template.mjs show` and settle the template as described in Title Template.
-3. Find the Codex app `set_thread_title` and `set_thread_archived` tools.
+3. Resolve the platform and find its rename method from Platform and Scripts.
 4. Start at offset `0` and run the lightweight title check:
 
    ```bash
-   node ~/.codex/skills/codex-session-renamer/scripts/collect-session-contexts.mjs --check-only --limit 20 --offset <offset>
+   node <skill-dir>/scripts/collect-session-contexts.mjs --platform <platform> --check-only --limit 20 --offset <offset>
    ```
 
-5. The collector reads SQLite in read-only mode, queries only the requested batch, and reconciles titles with the newest dated entry in `session_index.jsonl`. Batches follow the app's `recency_at_ms` order; title dates use meaningful conversation timestamps from that batch's rollouts. If `batchCompliant` is `true`, stop immediately. Do not inspect any older batch.
+5. The collector only reads local files. For `codex` it reads SQLite in read-only mode, queries only the requested batch, reconciles titles with the newest dated entry in `session_index.jsonl`, and follows the app's `recency_at_ms` order. For `claude-desktop` it reads the app's session list in last-activity order with the app's titles; for `claude-cli` it lists top-level transcripts in modification order with their latest `custom-title`. Title dates use meaningful conversation timestamps from each session's transcript or rollout. If `batchCompliant` is `true`, stop immediately. Do not inspect any older batch.
 6. If at least one session has `compliant: false`, retain that batch's ordered session IDs, original archive states, and `nextOffset`. Obtain context for those exact IDs rather than querying the offset again, because concurrent conversation activity can change its membership:
 
    ```bash
-   node ~/.codex/skills/codex-session-renamer/scripts/collect-session-contexts.mjs --ids '<comma-separated IDs from the checked batch>'
+   node <skill-dir>/scripts/collect-session-contexts.mjs --platform <platform> --ids '<comma-separated IDs from the checked batch>'
    ```
 
 7. Resummarize and rename every session in that batch, including titles that were already compliant. Identify the theme that persists across the full goal arc; treat late cleanup, reporting, handoff, or follow-up requests as supporting details unless the conversation clearly pivots. Before writing, verify that each candidate starts with its exact collected `titlePrefix`, ends with its `titleSuffix`, and has a 10-28 character topic between them; count Unicode characters with `Array.from`, not UTF-16 string length.
-8. Rename through `set_thread_title`. For an archived session, first set `archived: false`, rename it, then restore `archived: true` even if the rename fails; direct archived renames may not persist. Preserve each session's original archive state.
-9. Recheck the same IDs with `--check-only --ids '<the same comma-separated IDs>'`. Confirm every actual title equals its proposed title, all titles are compliant, and archive states match their originals. If a write has not persisted, reread and retry only the affected sessions once, restoring their archive state again. Report any remaining failure and stop instead of moving to an older batch. A successful recheck of a repaired batch is verification, not the stopping batch: continue with the `nextOffset` saved from its initial check. Stop when that saved offset is `null` or the next initially checked batch is fully compliant.
+8. Rename through the platform's method. For an archived session, unarchive it first (`archived: false` for Codex, `unarchive_session` in the desktop app), rename it, then archive it again even if the rename fails; direct archived renames may not persist. Preserve each session's original archive state. A declined desktop approval counts as skipped, not failed.
+9. Recheck the same IDs with `--platform <platform> --check-only --ids '<the same comma-separated IDs>'`. Confirm every actual title equals its proposed title, all titles are compliant, and archive states match their originals. If a write has not persisted, reread and retry only the affected sessions once, restoring their archive state again. Report any remaining failure and stop instead of moving to an older batch. A successful recheck of a repaired batch is verification, not the stopping batch: continue with the `nextOffset` saved from its initial check. Stop when that saved offset is `null` or the next initially checked batch is fully compliant.
 10. Return a concise report containing checked, renamed, skipped, and failed counts, plus whether the run stopped on a compliant batch.
 
 Title compliance requires the exact collected `titlePrefix` and `titleSuffix` for the active template with a 10-28 character topic between them. The collector reports the active `template` and whether it came from an `argument`, the saved `config`, or the `default`.
 
-Use the provided collector; do not replace it with ad hoc history-parsing scripts. Run it by its installed path so the working directory does not affect execution. `--limit` accepts 1-20, `--offset` accepts a nonnegative integer, and `--ids` selects at most 20 unique root-session IDs without positional pagination. Oversized old titles are bounded display excerpts marked `currentTitleTruncated`; use the supplied compliance result rather than validating that excerpt as the stored title. Valid new titles are returned in full for exact persistence checks. When `rollout_path` is absent but `<rollout_path>.zst` exists, the collector reads the compressed rollout. Rollouts missing in both forms retain the creation-date fallback; other query or file-read failures stop the run. Report those failures without repairing the database or silently omitting requested sessions. Never continue to older batches after a fully compliant batch.
+Use the provided collector; do not replace it with ad hoc history-parsing scripts. Run it by its installed path so the working directory does not affect execution. `--limit` accepts 1-20, `--offset` accepts a nonnegative integer, and `--ids` selects at most 20 unique root-session IDs without positional pagination. Oversized old titles are bounded display excerpts marked `currentTitleTruncated`; use the supplied compliance result rather than validating that excerpt as the stored title. Valid new titles are returned in full for exact persistence checks. When a Codex `rollout_path` is absent but `<rollout_path>.zst` exists, the collector reads the compressed rollout. Rollouts missing in both forms retain the creation-date fallback. Claude sessions without a local transcript, such as cloud sessions, are not listed. If the desktop app holds sessions for several accounts, the collector stops and asks for `--desktop-dir <account>/<organization>`; other query or file-read failures stop the run. Report those failures without repairing the database or silently omitting requested sessions. Never continue to older batches after a fully compliant batch.
 
-Only sessions stored on this computer are in scope; titles do not sync to other computers. Never rename ChatGPT sessions, including synced ChatGPT Work conversations, or subagents. Never create or update an automation from this skill.
+Only sessions stored on this computer are in scope; titles do not sync to other computers. Never rename ChatGPT sessions, including synced ChatGPT Work conversations, claude.ai cloud sessions, or subagents. Never create or update an automation from this skill.

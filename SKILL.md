@@ -30,7 +30,7 @@ Pass `--platform <platform>` to every collector call. Rename only through the li
 - When omitted, choose each title's language from that session's dominant user-conversation language.
 - Detect the dominant language from meaningful user goals sampled across the full session. Ignore code, logs, commands, URLs, and proper names.
 - If a session is ambiguous, fall back to its current title's language, then to the invoking conversation's language.
-- Write all user-visible progress messages and the final report in the explicit language, or otherwise in the invoking conversation's language.
+- Write all user-visible progress messages and the final report in the explicit language; otherwise in the response language the user's standing instructions set (such as CLAUDE.md, AGENTS.md, or memory); otherwise in the invoking conversation's language. A bare invocation such as `/agent-session-renamer` carries no conversation language, and this skill's English text and tool output never do.
 - Preserve project names, product names, code identifiers, and standard technical terms unless they have a clearly established localized form.
 
 ## Title Template

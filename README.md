@@ -51,7 +51,7 @@ The date comes from the last meaningful user message or assistant answer. Progre
 Without a language option:
 
 - each title follows the dominant user language of its own session;
-- progress messages and the final report follow the language of the conversation that invoked the Skill;
+- progress messages and the final report follow the response language set in your standing instructions (such as CLAUDE.md or AGENTS.md), and otherwise the language of the conversation that invoked the Skill;
 - ambiguous sessions fall back to the current title language, then to the invoking conversation language.
 
 With an explicit language:

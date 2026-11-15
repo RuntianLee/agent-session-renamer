@@ -52,6 +52,15 @@ function transcriptIndex(claudeDir) {
   return index;
 }
 
+// The desktop app passes the signed-in account and organization to the
+// sessions it starts. Outside the app, or in a build that does not, this is null.
+function signedInOrganization(desktopDir) {
+  const account = process.env.CLAUDE_CODE_ACCOUNT_UUID ?? "";
+  const organization = process.env.CLAUDE_CODE_ORGANIZATION_UUID ?? "";
+  if (!SESSION_UUID.test(account) || !SESSION_UUID.test(organization)) return null;
+  return join(desktopDir, account, organization);
+}
+
 // The app nests sessions as <account>/<organization>/local_*.json. Listing
 // reads a single signed-in organization so other accounts stay out of scope;
 // ownership checks read every organization so none is mistaken for terminal.
@@ -68,14 +77,17 @@ function desktopRecordFiles(desktopDir, allOrganizations) {
       const files = listDir(folder, "desktop session listing")
         .filter(entry => entry.isFile() && /^local_.+\.json$/.test(entry.name))
         .map(entry => join(folder, entry.name));
-      if (files.length) organizations.push(files);
+      if (files.length) organizations.push({ folder, files });
     }
   }
-  if (allOrganizations) return organizations.flat();
+  if (allOrganizations) return organizations.flatMap(({ files }) => files);
   if (organizations.length > 1) {
+    const signedIn = signedInOrganization(desktopDir);
+    const match = organizations.find(({ folder }) => folder === signedIn);
+    if (match) return match.files;
     throw new Error("desktop session listing failed (several accounts have sessions; pass --desktop-dir <account>/<organization>)");
   }
-  return organizations[0] ?? [];
+  return organizations[0]?.files ?? [];
 }
 
 function desktopRecords(desktopDir, allOrganizations = false) {

@@ -693,9 +693,14 @@ function claudeFixture(callback) {
   const writeDesktop = (id, record) => writeFileSync(join(organization, `local_${id}.json`), JSON.stringify({
     sessionId: `local_${id}`, cwd: "/Users/example/project", isArchived: false, titleSource: "user", ...record,
   }));
-  const collect = (platform, args = []) => JSON.parse(execFileSync("node", [
+  // The suite may itself run inside the desktop app; fixtures choose the signed-in account explicitly.
+  const collect = (platform, args = [], signedIn = {}) => JSON.parse(execFileSync("node", [
     script, "--platform", platform, "--claude-dir", claudeDir, "--desktop-dir", desktopRoot, ...args,
-  ], { encoding: "utf8", stdio: "pipe", env: { ...process.env, TZ: "UTC" } }));
+  ], {
+    encoding: "utf8",
+    stdio: "pipe",
+    env: { ...process.env, TZ: "UTC", CLAUDE_CODE_ACCOUNT_UUID: "", CLAUDE_CODE_ORGANIZATION_UUID: "", ...signedIn },
+  }));
   const rename = (id, title, extra = []) => JSON.parse(execFileSync("node", [
     renameScript, "--id", id, "--title", title, "--claude-dir", claudeDir, "--desktop-dir", desktopRoot, ...extra,
   ], { encoding: "utf8", stdio: "pipe" }));
@@ -752,6 +757,30 @@ test("claude-desktop refuses to mix accounts unless one organization is chosen",
       script, "--platform", "claude-desktop", "--claude-dir", join(desktopRoot, "..", "claude"), "--desktop-dir", organization,
     ], { encoding: "utf8", stdio: "pipe" }));
     assert.deepEqual(chosen.sessions.map(({ id }) => id), ["local_first"]);
+  });
+});
+
+test("claude-desktop picks the signed-in account when several accounts have sessions", () => {
+  claudeFixture(({ desktopRoot, writeTranscript, writeDesktop, collect }) => {
+    writeTranscript(uuid(1), [claudeEntry("user", "Shared session request text", "2026-01-02T10:00:00Z")]);
+    writeDesktop("first", { cliSessionId: uuid(1), title: "First", createdAt: 1, lastActivityAt: 1 });
+    const signedInFolder = join(desktopRoot, uuid(11), uuid(12));
+    mkdirSync(signedInFolder, { recursive: true });
+    writeFileSync(join(signedInFolder, "local_second.json"), JSON.stringify({ sessionId: "local_second", cliSessionId: uuid(1), title: "Second" }));
+    const signedIn = { CLAUDE_CODE_ACCOUNT_UUID: uuid(11), CLAUDE_CODE_ORGANIZATION_UUID: uuid(12) };
+    assert.deepEqual(collect("claude-desktop", [], signedIn).sessions.map(({ id }) => id), ["local_second"]);
+
+    // A signed-in account without sessions of its own, or an unusable value, resolves nothing.
+    for (const other of [
+      { CLAUDE_CODE_ACCOUNT_UUID: uuid(11), CLAUDE_CODE_ORGANIZATION_UUID: uuid(13) },
+      { CLAUDE_CODE_ACCOUNT_UUID: "..", CLAUDE_CODE_ORGANIZATION_UUID: "account/organization" },
+      { CLAUDE_CODE_ACCOUNT_UUID: uuid(11) },
+    ]) {
+      assert.throws(() => collect("claude-desktop", [], other), error => {
+        assert.match(error.stderr, /several accounts have sessions/);
+        return true;
+      });
+    }
   });
 });
 

@@ -175,7 +175,7 @@ git clone https://github.com/RuntianLee/agent-session-renamer ~/.claude/skills/a
 
 采集器只读取本地文件。它不会自己决定标题、修改数据库或执行重命名。Codex 和 Claude 桌面 App 的标题由各自的官方会话工具写入。只有两个脚本会写文件：`title-template.mjs` 只写自己的配置文件，`claude-cli-rename.mjs` 只向单个终端会话记录追加一条 `custom-title` 记录。采集器按已保存的模板（或单次传入的 `--template`）检查标题，并返回每个会话的 `titlePrefix` 和 `titleSuffix`。
 
-采集器会拒绝未知参数和非法数值。`--limit` 接受 1–20，`--offset` 接受非负整数。读取或复查已选定批次时，用 `--ids id1,id2,...` 固定身份，保持传入顺序，并要求所有 ID 都对应现存根会话；它不能与位置分页参数混用。两种选择方式均可加 `--check-only`。历史字符串消息内容可以读取，无关或不完整 JSON 记录会跳过。Codex 会把较旧的会话记录压缩为 `<rollout_path>.zst`，此时采集器改读压缩文件；未压缩的原文件始终优先。如果 Codex 已退出，而采集器又不能在 `state_5.sqlite` 所在目录写文件（例如在沙箱中运行），它会以 immutable 只读方式打开已完整落盘的数据库；如果还留有 `-wal` 文件，则报错停止。在桌面 App 中，采集器只读取一个账号的会话；如果多个账号都有会话，它会停止并要求传入 `--desktop-dir <account>/<organization>`。
+采集器会拒绝未知参数和非法数值。`--limit` 接受 1–20，`--offset` 接受非负整数。读取或复查已选定批次时，用 `--ids id1,id2,...` 固定身份，保持传入顺序，并要求所有 ID 都对应现存根会话；它不能与位置分页参数混用。两种选择方式均可加 `--check-only`。历史字符串消息内容可以读取，无关或不完整 JSON 记录会跳过。Codex 会把较旧的会话记录压缩为 `<rollout_path>.zst`，此时采集器改读压缩文件；未压缩的原文件始终优先。如果 Codex 已退出，而采集器又不能在 `state_5.sqlite` 所在目录写文件（例如在沙箱中运行），它会以 immutable 只读方式打开已完整落盘的数据库；如果还留有 `-wal` 文件，则报错停止。在桌面 App 中，采集器只读取一个账号的会话；如果多个账号都有会话，它会读取当前登录账号的会话（App 通过 `CLAUDE_CODE_ACCOUNT_UUID` 和 `CLAUDE_CODE_ORGANIZATION_UUID` 告知会话）；识别不出当前账号时，它会停止并要求传入 `--desktop-dir <account>/<organization>`。
 
 运行测试：`node --test tests/`。
 
